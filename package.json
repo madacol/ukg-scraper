@@ -1,0 +1,16 @@
+{
+  "name": "ukg-scraper",
+  "version": "1.0.0",
+  "description": "Scrape work schedules from UKG Kronos (Dunnes)",
+  "main": "scrape-schedule.js",
+  "scripts": {
+    "scrape": "node scrape-schedule.js",
+    "install-browser": "npx playwright install chromium"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "playwright": "^1.58.2"
+  }
+}
