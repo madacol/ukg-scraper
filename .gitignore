@@ -1,3 +1,5 @@
 node_modules/
 debug-*.png
 secret*
+config.json
+data/

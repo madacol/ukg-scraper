@@ -5,12 +5,14 @@
   "main": "scrape-schedule.js",
   "scripts": {
     "scrape": "node scrape-schedule.js",
+    "run-daily": "node run-daily.js",
     "install-browser": "npx playwright install chromium"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "nodemailer": "^8.0.1",
     "playwright": "^1.58.2"
   }
 }
