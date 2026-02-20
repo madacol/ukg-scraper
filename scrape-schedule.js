@@ -1,4 +1,4 @@
-const { chromium } = require("playwright");
+import { chromium } from "playwright";
 
 const BASE_URL = "https://dunnes.prd.mykronos.com";
 

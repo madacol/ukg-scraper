@@ -1,8 +1,10 @@
-const { execFileSync } = require("child_process");
-const fs = require("fs");
-const path = require("path");
-const nodemailer = require("nodemailer");
+import { execFileSync } from "child_process";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import nodemailer from "nodemailer";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "data");
 const CONFIG_PATH = path.join(__dirname, "config.json");
 
@@ -81,15 +83,15 @@ function parseTime(str) {
   return parseInt(m[1]) * 60 + parseInt(m[2]);
 }
 
-function detectTimecardDiscrepancy(scheduleData, timecardData) {
+function detectTimecardDiscrepancy(scheduleData, timecardData, dateOverride) {
   if (!scheduleData || !timecardData) return null;
 
-  const todayStr = today();
+  const d = dateOverride ? new Date(dateOverride + "T00:00:00") : new Date();
+  const todayStr = d.toISOString().slice(0, 10);
   const todayShift = scheduleData.shifts.find((s) => s.date === todayStr && !s.off);
   if (!todayShift) return null;
 
   // Timecard dates are MM/DD format — match against today
-  const d = new Date();
   const mmdd = `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
   const todayEntry = timecardData.entries.find((e) => e.date === mmdd);
   if (!todayEntry || (!todayEntry.clockIn1 && !todayEntry.clockOut1)) return null;
@@ -245,7 +247,12 @@ async function main() {
   log("Done.");
 }
 
-main().catch((err) => {
-  console.error("Fatal:", err);
-  process.exit(1);
-});
+export { detectScheduleChanges, detectTimecardDiscrepancy, detectTimecardChanges, parseTime };
+
+const isMainModule = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+if (isMainModule) {
+  main().catch((err) => {
+    console.error("Fatal:", err);
+    process.exit(1);
+  });
+}
