@@ -203,6 +203,7 @@ async function main() {
 
     // Step 5: Collect schedule data for 6 weeks
     const allShifts = [];
+    let previousDayFingerprint = null;
 
     for (let week = 0; week < WEEKS_TO_FETCH; week++) {
       console.error(`Scraping week ${week + 1} of ${WEEKS_TO_FETCH}...`);
@@ -213,6 +214,19 @@ async function main() {
       const rawDays = parseDaysFromText(pageText);
 
       if (rawDays.length > 0) {
+        // Detect stale page: if the parsed days are identical to the
+        // previous week, navigation failed — stop to avoid ghost data.
+        const currentFingerprint = rawDays
+          .map((d) => `${d.day}_${d.dateNum}`)
+          .join(",");
+        if (previousDayFingerprint && currentFingerprint === previousDayFingerprint) {
+          console.error(
+            "  Page content unchanged after navigation — stopping to avoid duplicate data."
+          );
+          break;
+        }
+        previousDayFingerprint = currentFingerprint;
+
         console.error(`  Found ${rawDays.length} days`);
 
         for (const rawDay of rawDays) {
@@ -225,13 +239,26 @@ async function main() {
             continue;
           }
 
-          const timeMatch = rawDay.details
-            .join(" ")
-            .match(/(\d{1,2}:\d{2})\s*[–-]\s*(\d{1,2}:\d{2})/);
+          const detailText = rawDay.details.join(" ");
 
-          const isOff = rawDay.details.some(
-            (d) => d.includes("Day Off") || d.includes("nothing planned")
+          const timeMatch = detailText.match(
+            /(\d{1,2}:\d{2})\s*[–-]\s*(\d{1,2}:\d{2})/
           );
+
+          // Broad day-off / leave detection
+          const offPatterns =
+            /Day Off|nothing planned|Scheduled Off|No Shift|Off Day|ROI\b|TOR\b|PTO\b|Annual Leave|Leave|休|Absence|Holiday/i;
+          const isOff = rawDay.details.some((d) => offPatterns.test(d));
+          const offDetail = isOff
+            ? rawDay.details.find((d) => offPatterns.test(d)) || null
+            : null;
+
+          // Preserve raw details when we can't parse a time
+          const note = isOff
+            ? offDetail
+            : !timeMatch && rawDay.details.length > 0
+              ? rawDay.details.join(" | ")
+              : null;
 
           allShifts.push({
             date: fullDate,
@@ -239,12 +266,7 @@ async function main() {
             start: timeMatch ? timeMatch[1] : null,
             end: timeMatch ? timeMatch[2] : null,
             off: isOff,
-            note: isOff
-              ? rawDay.details.find(
-                  (d) =>
-                    d.includes("Day Off") || d.includes("nothing planned")
-                ) || null
-              : null,
+            note,
           });
         }
       } else {

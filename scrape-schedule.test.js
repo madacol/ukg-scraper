@@ -85,6 +85,25 @@ function parseDaysFromText(text) {
 
 // --- parseDaysFromText ---
 
+test("parseDaysFromText: day-off variations in details", () => {
+  const text = `
+    Mon
+    2
+    ROI Day Off Request TOR (Full)
+    Tue
+    3
+    Scheduled Off
+    Wed
+    4
+    Annual Leave
+  `;
+  const days = parseDaysFromText(text);
+  assert.strictEqual(days.length, 3);
+  assert.deepStrictEqual(days[0].details, ["ROI Day Off Request TOR (Full)"]);
+  assert.deepStrictEqual(days[1].details, ["Scheduled Off"]);
+  assert.deepStrictEqual(days[2].details, ["Annual Leave"]);
+});
+
 test("parseDaysFromText: pattern 1 — day name and date on separate lines", () => {
   const text = `
     Mon

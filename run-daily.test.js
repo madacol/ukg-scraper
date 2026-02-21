@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { detectScheduleChanges, detectTimecardDiscrepancy, detectTimecardChanges, parseTime } from "./run-daily.js";
+import { formatShift, detectScheduleChanges, detectTimecardDiscrepancy, detectTimecardChanges, parseTime } from "./run-daily.js";
 
 // --- parseTime ---
 
@@ -17,6 +17,28 @@ test("parseTime: null/invalid returns null", () => {
   assert.strictEqual(parseTime(""), null);
   assert.strictEqual(parseTime("abc"), null);
   assert.strictEqual(parseTime("12:60:00"), null);
+});
+
+// --- formatShift ---
+
+test("formatShift: normal shift", () => {
+  assert.strictEqual(formatShift({ start: "9:00", end: "17:00", off: false }), "9:00–17:00");
+});
+
+test("formatShift: day off with note", () => {
+  assert.strictEqual(formatShift({ start: null, end: null, off: true, note: "ROI Day Off Request TOR (Full)" }), "ROI Day Off Request TOR (Full)");
+});
+
+test("formatShift: day off without note", () => {
+  assert.strictEqual(formatShift({ start: null, end: null, off: true, note: null }), "Day Off");
+});
+
+test("formatShift: no time, no off, but has note (raw details)", () => {
+  assert.strictEqual(formatShift({ start: null, end: null, off: false, note: "Some unknown text" }), "Some unknown text");
+});
+
+test("formatShift: no time, no off, no note", () => {
+  assert.strictEqual(formatShift({ start: null, end: null, off: false, note: null }), "No details");
 });
 
 // --- detectScheduleChanges ---
