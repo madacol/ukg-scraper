@@ -82,6 +82,8 @@ function parseDaysFromText(text) {
     // Accumulate detail lines for the current day
     if (current) {
       if (line === "Today") continue;
+      // Skip organization hierarchy paths (e.g. "Dunnes All/REPUBLIC OF IRELAND/...")
+      if ((line.match(/\//g) || []).length >= 2) continue;
       current.details.push(line);
     }
   }
@@ -293,10 +295,22 @@ async function main() {
       process.exit(1);
     }
 
-    // Step 6: Deduplicate by date (keep latest data for each date) and sort
+    // Step 6: Deduplicate by date and sort.
+    // When the same date appears twice (UKG shows 2 weeks at a time),
+    // prefer entries with actual shift times over entries without.
     const shiftsByDate = new Map();
     for (const shift of allShifts) {
-      shiftsByDate.set(shift.date, shift);
+      const existing = shiftsByDate.get(shift.date);
+      if (existing) {
+        const existingHasTime = existing.start && existing.end;
+        const newHasTime = shift.start && shift.end;
+        // Only overwrite if new entry has times, or existing has none
+        if (newHasTime || !existingHasTime) {
+          shiftsByDate.set(shift.date, shift);
+        }
+      } else {
+        shiftsByDate.set(shift.date, shift);
+      }
     }
     const shifts = [...shiftsByDate.values()].sort((a, b) =>
       a.date.localeCompare(b.date)

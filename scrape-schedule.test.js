@@ -74,6 +74,8 @@ function parseDaysFromText(text) {
 
     if (current) {
       if (line === "Today") continue;
+      // Skip organization hierarchy paths (e.g. "Dunnes All/REPUBLIC OF IRELAND/...")
+      if ((line.match(/\//g) || []).length >= 2) continue;
       current.details.push(line);
     }
   }
@@ -102,6 +104,23 @@ test("parseDaysFromText: day-off variations in details", () => {
   assert.deepStrictEqual(days[0].details, ["ROI Day Off Request TOR (Full)"]);
   assert.deepStrictEqual(days[1].details, ["Scheduled Off"]);
   assert.deepStrictEqual(days[2].details, ["Annual Leave"]);
+});
+
+test("parseDaysFromText: filters out organization hierarchy paths", () => {
+  const text = `
+    Sat
+    21
+    09:00–14:00
+    Dunnes All/REPUBLIC OF IRELAND/DS ROI BUSINESS GROUP/Dublin West/253/DIV Grocery/DPT Online Food Ordering/SUB Online Food Ordering
+    Sun
+    22
+    nothing planned
+  `;
+  const days = parseDaysFromText(text);
+  assert.strictEqual(days.length, 2);
+  // Org path should be filtered out, only the time remains
+  assert.deepStrictEqual(days[0].details, ["09:00–14:00"]);
+  assert.deepStrictEqual(days[1].details, ["nothing planned"]);
 });
 
 test("parseDaysFromText: pattern 1 — day name and date on separate lines", () => {
