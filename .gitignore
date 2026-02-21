@@ -3,4 +3,4 @@ debug-*.png
 secret*
 config.json
 data/
-.claude/
+

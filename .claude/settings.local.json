@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node scrape-timecard.js:*)",
+      "Bash(crontab:*)",
+      "Bash(/usr/bin/node:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(npm test)"
+    ]
+  }
+}
