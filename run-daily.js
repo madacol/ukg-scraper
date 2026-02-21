@@ -24,13 +24,18 @@ function log(msg) {
   console.error(`[${new Date().toISOString()}] ${msg}`);
 }
 
-// --- Scraper runners ---
+// --- Scraper runner ---
 
-function runScraper(script, config) {
+/**
+ * Run the unified scraper and return combined results.
+ * @param {{ ukg: { username: string, password: string } }} config
+ * @returns {{ schedule: Object | null, timecard: Object | null, errors: string[] }}
+ */
+function runScrapers(config) {
   const result = execFileSync(
     process.execPath,
-    [path.join(__dirname, script), config.ukg.username, config.ukg.password],
-    { encoding: "utf8", timeout: 180_000, stdio: ["pipe", "pipe", "inherit"] }
+    [path.join(__dirname, "scrape-all.js"), config.ukg.username, config.ukg.password],
+    { encoding: "utf8", timeout: 300_000, stdio: ["pipe", "pipe", "inherit"] }
   );
   return JSON.parse(result);
 }
@@ -184,27 +189,32 @@ async function main() {
   const prevSchedule = loadLatest("schedule");
   const prevTimecard = loadLatest("timecard");
 
-  // Run scrapers
-  log("Running schedule scraper...");
+  // Run unified scraper (single login, parallel scrapes)
+  log("Running scrapers...");
   let scheduleData;
-  try {
-    scheduleData = runScraper("scrape-schedule.js", config);
-    saveData("schedule", date, scheduleData);
-    log(`Schedule saved: data/schedule-${date}.json`);
-  } catch (err) {
-    log(`Schedule scraper failed: ${err.message}`);
-    alerts.push("Schedule scraper FAILED:\n  " + err.message);
-  }
-
-  log("Running timecard scraper...");
   let timecardData;
   try {
-    timecardData = runScraper("scrape-timecard.js", config);
-    saveData("timecard", date, timecardData);
-    log(`Timecard saved: data/timecard-${date}.json`);
+    const result = runScrapers(config);
+
+    for (const err of result.errors) {
+      log(err);
+      alerts.push(err);
+    }
+
+    if (result.schedule) {
+      scheduleData = result.schedule;
+      saveData("schedule", date, scheduleData);
+      log(`Schedule saved: data/schedule-${date}.json`);
+    }
+
+    if (result.timecard) {
+      timecardData = result.timecard;
+      saveData("timecard", date, timecardData);
+      log(`Timecard saved: data/timecard-${date}.json`);
+    }
   } catch (err) {
-    log(`Timecard scraper failed: ${err.message}`);
-    alerts.push("Timecard scraper FAILED:\n  " + err.message);
+    log(`Scraper failed: ${err.message}`);
+    alerts.push("Scraper FAILED:\n  " + err.message);
   }
 
   // Detect changes

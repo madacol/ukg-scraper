@@ -7,7 +7,7 @@
   "scripts": {
     "scrape": "node scrape-schedule.js",
     "run-daily": "node run-daily.js",
-    "test": "node --test run-daily.test.js",
+    "test": "node --test *.test.js",
     "install-browser": "npx playwright install chromium"
   },
   "keywords": [],
