@@ -13,21 +13,23 @@ function addDays(d, n) {
   return result;
 }
 
-// Build a lookup table of expected dates covering the fetch window.
-// Maps (dayName, dayOfMonth) pairs to full ISO date strings.
-// Within a ~7-week span this pair is always unique.
-function buildDateLookup() {
+// Build a date lookup scoped to a specific week offset from today.
+// Uses a ±10 day window around the expected week, which is narrow enough
+// that (dayName, dayOfMonth) pairs are always unique (the same pair can
+// only repeat after 28+ days, which exceeds the 21-day window).
+function buildDateLookupForWeek(weekOffset) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const dayNameMap = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+  const refDate = addDays(today, weekOffset * 7);
   const lookup = new Map();
-  // Start 7 days before today (the schedule page may show the full current week)
-  // and extend 7 days past the fetch window for safety
-  for (let i = -7; i < WEEKS_TO_FETCH * 7 + 7; i++) {
-    const d = addDays(today, i);
+  for (let i = -10; i <= 10; i++) {
+    const d = addDays(refDate, i);
     const key = `${dayNameMap[d.getDay()]}_${d.getDate()}`;
-    lookup.set(key, formatDate(d));
+    if (!lookup.has(key)) {
+      lookup.set(key, formatDate(d));
+    }
   }
   return lookup;
 }
@@ -200,13 +202,13 @@ async function main() {
     await page.waitForTimeout(1500); // let content fully render
 
     // Step 5: Collect schedule data for 6 weeks
-    const dateLookup = buildDateLookup();
     const allShifts = [];
 
     for (let week = 0; week < WEEKS_TO_FETCH; week++) {
       console.error(`Scraping week ${week + 1} of ${WEEKS_TO_FETCH}...`);
       await page.waitForTimeout(2000);
 
+      const dateLookup = buildDateLookupForWeek(week);
       const pageText = await page.evaluate(() => document.body.innerText);
       const rawDays = parseDaysFromText(pageText);
 
