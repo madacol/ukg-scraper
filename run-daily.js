@@ -30,7 +30,7 @@ function runScraper(script, config) {
   const result = execFileSync(
     process.execPath,
     [path.join(__dirname, script), config.ukg.username, config.ukg.password],
-    { encoding: "utf8", timeout: 60_000, stdio: ["pipe", "pipe", "inherit"] }
+    { encoding: "utf8", timeout: 180_000, stdio: ["pipe", "pipe", "inherit"] }
   );
   return JSON.parse(result);
 }
