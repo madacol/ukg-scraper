@@ -45,7 +45,7 @@ async function main() {
       const allText = document.body.innerText;
       // Extract the My Schedule tile content
       const tileMatch = allText.match(
-        /View My Schedule\n([\s\S]*?)(?:My Accruals|My Personal Data|Loading complete)/
+        /View My Schedule\n([\s\S]*?)(?:My Accruals|My Personal Data|Loading complete|Load more)/
       );
       if (!tileMatch) return null;
 
@@ -65,6 +65,7 @@ async function main() {
           i++; // skip the date number line
         } else if (current) {
           if (line === "Today") continue;
+          if (line === "Load more") break;
           current.details.push(line);
         }
       }
@@ -101,8 +102,8 @@ async function main() {
         .join(" ")
         .match(/(\d{1,2}:\d{2})\s*[–-]\s*(\d{1,2}:\d{2})/);
 
-      const isOff =
-        day.details.some((d) => d.includes("Day Off") || d.includes("nothing planned"));
+      const offMatch = (d) => d.includes("Day Off") || d.includes("nothing planned") || d.includes("TOR");
+      const isOff = day.details.some(offMatch);
 
       return {
         date: fullDate,
@@ -110,7 +111,7 @@ async function main() {
         start: timeMatch ? timeMatch[1] : null,
         end: timeMatch ? timeMatch[2] : null,
         off: isOff,
-        note: isOff ? day.details.find((d) => d.includes("Day Off") || d.includes("nothing planned")) || null : null,
+        note: isOff ? day.details.find(offMatch) || null : null,
       };
     });
 

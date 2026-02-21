@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { detectScheduleChanges, detectTimecardDiscrepancy, detectTimecardChanges, parseTime } from "./run-daily.js";
+import { formatShift, detectScheduleChanges, detectTimecardDiscrepancy, detectTimecardChanges, parseTime } from "./run-daily.js";
 
 // --- parseTime ---
 
@@ -17,6 +17,24 @@ test("parseTime: null/invalid returns null", () => {
   assert.strictEqual(parseTime(""), null);
   assert.strictEqual(parseTime("abc"), null);
   assert.strictEqual(parseTime("12:60:00"), null);
+});
+
+// --- formatShift ---
+
+test("formatShift: regular shift shows times", () => {
+  assert.strictEqual(formatShift({ start: "9:00", end: "17:00", off: false }), "9:00–17:00");
+});
+
+test("formatShift: day off shows note", () => {
+  assert.strictEqual(formatShift({ start: null, end: null, off: true, note: "Day Off" }), "Day Off");
+});
+
+test("formatShift: TOR entry shows note", () => {
+  assert.strictEqual(formatShift({ start: null, end: null, off: true, note: "ROI PT Staff TOR (Full)" }), "ROI PT Staff TOR (Full)");
+});
+
+test("formatShift: no times and not off shows dash", () => {
+  assert.strictEqual(formatShift({ start: null, end: null, off: false }), "—");
 });
 
 // --- detectScheduleChanges ---
@@ -64,6 +82,15 @@ test("detectScheduleChanges: new day appears", () => {
   assert.strictEqual(result.length, 1);
   assert.ok(result[0].includes("NEW"));
   assert.ok(result[0].includes("2026-02-21"));
+});
+
+test("detectScheduleChanges: TOR entry shows note not null-null", () => {
+  const oldData = { shifts: [] };
+  const newData = { shifts: [{ date: "2026-03-02", day: "Mon", start: null, end: null, off: true, note: "ROI PT Staff TOR (Full)" }] };
+  const result = detectScheduleChanges(oldData, newData);
+  assert.ok(result);
+  assert.ok(result[0].includes("ROI PT Staff TOR (Full)"));
+  assert.ok(!result[0].includes("null"));
 });
 
 // --- detectTimecardDiscrepancy ---

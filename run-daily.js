@@ -53,6 +53,12 @@ function loadLatest(name) {
 
 // --- Change detection ---
 
+function formatShift(s) {
+  if (s.off) return s.note || "Day Off";
+  if (s.start && s.end) return `${s.start}–${s.end}`;
+  return "—";
+}
+
 function detectScheduleChanges(oldData, newData) {
   if (!oldData) return null;
 
@@ -63,13 +69,11 @@ function detectScheduleChanges(oldData, newData) {
   for (const s of newData.shifts) {
     const prev = oldShifts[s.date];
     if (!prev) {
-      changes.push(`  NEW: ${s.date} (${s.day}) — ${s.off ? s.note : `${s.start}–${s.end}`}`);
+      changes.push(`  NEW: ${s.date} (${s.day}) — ${formatShift(s)}`);
       continue;
     }
     if (prev.start !== s.start || prev.end !== s.end || prev.off !== s.off) {
-      const was = prev.off ? prev.note || "Day Off" : `${prev.start}–${prev.end}`;
-      const now = s.off ? s.note || "Day Off" : `${s.start}–${s.end}`;
-      changes.push(`  CHANGED: ${s.date} (${s.day}): ${was} → ${now}`);
+      changes.push(`  CHANGED: ${s.date} (${s.day}): ${formatShift(prev)} → ${formatShift(s)}`);
     }
   }
 
@@ -247,7 +251,7 @@ async function main() {
   log("Done.");
 }
 
-export { detectScheduleChanges, detectTimecardDiscrepancy, detectTimecardChanges, parseTime };
+export { formatShift, detectScheduleChanges, detectTimecardDiscrepancy, detectTimecardChanges, parseTime };
 
 const isMainModule = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 if (isMainModule) {
