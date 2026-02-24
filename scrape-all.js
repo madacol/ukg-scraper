@@ -45,6 +45,51 @@ import { formatDate, addDays, mapApiToShifts } from "./schedule-utils.js";
 const BASE_URL = "https://dunnes.prd.mykronos.com";
 
 /**
+ * Resolve an MM/DD date string to a full Date, using the reference date's year.
+ * Handles the Dec→Jan year boundary (Dec entries resolve to the previous year
+ * when the reference date is in January).
+ * @param {string} mmdd - Date in MM/DD format
+ * @param {Date} referenceDate
+ * @returns {Date}
+ */
+function resolveEntryDate(mmdd, referenceDate) {
+  const [mm, dd] = mmdd.split("/").map(Number);
+  let year = referenceDate.getFullYear();
+  if (mm === 12 && referenceDate.getMonth() === 0) {
+    year--;
+  }
+  return new Date(year, mm - 1, dd);
+}
+
+/**
+ * Filter timecard entries to only those within the last 14 days from the
+ * reference date. Deduplicates by date (last occurrence wins) and returns
+ * entries sorted by date ascending.
+ * @param {TimecardEntry[]} entries
+ * @param {string} referenceDateStr - ISO date string (YYYY-MM-DD)
+ * @returns {TimecardEntry[]}
+ */
+function filterTimecardEntries(entries, referenceDateStr) {
+  const ref = new Date(referenceDateStr + "T00:00:00");
+  const cutoff = new Date(ref);
+  cutoff.setDate(cutoff.getDate() - 14);
+
+  /** @type {Map<string, TimecardEntry>} */
+  const byDate = new Map();
+
+  for (const entry of entries) {
+    const entryDate = resolveEntryDate(entry.date, ref);
+    if (entryDate >= cutoff && entryDate <= ref) {
+      byDate.set(entry.date, entry);
+    }
+  }
+
+  return [...byDate.values()].sort((a, b) => {
+    return resolveEntryDate(a.date, ref) - resolveEntryDate(b.date, ref);
+  });
+}
+
+/**
  * Fetch schedule data via the JSON API from a logged-in page.
  * @param {import("playwright").BrowserContext} context
  * @param {import("playwright").Page} page - Any page in the authenticated context
@@ -116,25 +161,12 @@ async function scrapeSchedule(context, page) {
 }
 
 /**
- * Scrape timecard data from its own page.
+ * Extract timecard entries from the currently loaded timecard grid.
  * @param {import("playwright").Page} page
- * @returns {Promise<TimecardResult>}
+ * @returns {Promise<TimecardEntry[]>}
  */
-async function scrapeTimecard(page) {
-  console.error("[timecard] Opening My Timecard...");
-  await page.goto(BASE_URL + "/wfd/home", { waitUntil: "networkidle", timeout: 60000 });
-  await page.waitForTimeout(3000);
-  await page.getByText("Open My Timecard").click({ timeout: 10000 });
-  await page.waitForURL((url) => url.toString().includes("/myTimecard"), {
-    timeout: 30000,
-  });
-
-  await page.waitForSelector("#_timeFrame", { timeout: 10000 });
-  await page.waitForTimeout(3000);
-
-  console.error("[timecard] Parsing...");
-  /** @type {TimecardEntry[]} */
-  const entries = await page.evaluate(() => {
+async function extractTimecardEntries(page) {
+  return page.evaluate(() => {
     /** @type {TimecardEntry[]} */
     const results = [];
 
@@ -175,16 +207,57 @@ async function scrapeTimecard(page) {
 
     return results;
   });
+}
 
-  if (!entries || entries.length === 0) {
+/**
+ * Scrape timecard data covering the last 2 weeks.
+ * Scrapes the current pay period, then navigates to the previous period
+ * and scrapes that too. Entries are filtered to the last 14 days.
+ * @param {import("playwright").Page} page
+ * @returns {Promise<TimecardResult>}
+ */
+async function scrapeTimecard(page) {
+  console.error("[timecard] Opening My Timecard...");
+  await page.goto(BASE_URL + "/wfd/home", { waitUntil: "networkidle", timeout: 60000 });
+  await page.waitForTimeout(3000);
+  await page.getByText("Open My Timecard").click({ timeout: 10000 });
+  await page.waitForURL((url) => url.toString().includes("/myTimecard"), {
+    timeout: 30000,
+  });
+
+  await page.waitForSelector("#_timeFrame", { timeout: 10000 });
+  await page.waitForTimeout(3000);
+
+  console.error("[timecard] Parsing current period...");
+  const currentEntries = await extractTimecardEntries(page);
+
+  // Navigate to previous pay period and scrape it too
+  /** @type {TimecardEntry[]} */
+  let previousEntries = [];
+  try {
+    console.error("[timecard] Navigating to previous period...");
+    await page.selectOption("#_timeFrame", { label: "Previous Pay Period" });
+    await page.waitForTimeout(3000);
+    previousEntries = await extractTimecardEntries(page);
+    console.error(`[timecard] Got ${previousEntries.length} entries from previous period.`);
+  } catch (err) {
+    console.error("[timecard] Could not navigate to previous period: " + /** @type {Error} */ (err).message);
+  }
+
+  // Combine (previous first so current overwrites on dedup) and filter to last 14 days
+  const allEntries = [...previousEntries, ...currentEntries];
+  const today = new Date().toISOString().split("T")[0];
+  const entries = filterTimecardEntries(allEntries, today);
+
+  if (entries.length === 0) {
     throw new Error("Could not parse timecard data");
   }
 
-  console.error(`[timecard] Found ${entries.length} entries. Done.`);
+  console.error(`[timecard] Found ${entries.length} entries (last 2 weeks). Done.`);
 
   return {
     extractedAt: new Date().toISOString(),
-    period: "Current Pay Period",
+    period: "Last 2 Weeks",
     entries,
   };
 }
@@ -281,4 +354,12 @@ async function main() {
   }
 }
 
-main();
+export { filterTimecardEntries };
+
+const isMainModule = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+if (isMainModule) {
+  main().catch((err) => {
+    console.error("Fatal:", err);
+    process.exit(1);
+  });
+}
