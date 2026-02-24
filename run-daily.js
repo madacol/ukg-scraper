@@ -63,15 +63,50 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 
 /** @type {Record<string, string>} */
 const FIELD_LABELS = {
-  clockIn1: "Clock In",
-  clockOut1: "Clock Out",
-  clockIn2: "Clock In 2",
-  clockOut2: "Clock Out 2",
   payCode: "Pay Code",
   amount: "Amount",
-  shiftTotal: "Shift Total",
-  dailyTotal: "Daily Total",
 };
+
+/**
+ * Format clock in/out pairs as "9:00 - 17:00" or "13:56 - 16:36, 16:51 - 19:26".
+ * Returns null if there are no clock pairs.
+ * @param {Record<string, string | null | undefined>} entry
+ * @returns {string | null}
+ */
+function formatClockPairs(entry) {
+  const pairs = [];
+  if (entry.clockIn1) {
+    pairs.push(`${entry.clockIn1} - ${entry.clockOut1 ?? "?"}`);
+  }
+  if (entry.clockIn2) {
+    pairs.push(`${entry.clockIn2} - ${entry.clockOut2 ?? "?"}`);
+  }
+  return pairs.length > 0 ? pairs.join(", ") : null;
+}
+
+/**
+ * Calculate daily total from clock in/out pairs in H:MM format.
+ * Returns null if there are no complete pairs.
+ * @param {Record<string, string | null | undefined>} entry
+ * @returns {string | null}
+ */
+function calculateDailyTotal(entry) {
+  let totalMinutes = 0;
+  const in1 = parseTime(entry.clockIn1);
+  const out1 = parseTime(entry.clockOut1);
+  if (in1 !== null && out1 !== null) {
+    totalMinutes += out1 - in1;
+  }
+  const in2 = parseTime(entry.clockIn2);
+  const out2 = parseTime(entry.clockOut2);
+  if (in2 !== null && out2 !== null) {
+    totalMinutes += out2 - in2;
+  }
+  if (totalMinutes <= 0) return null;
+  const hours = Math.floor(totalMinutes / 60);
+  const mins = totalMinutes % 60;
+  return `${hours}:${String(mins).padStart(2, "0")}`;
+}
 
 /**
  * Format an ISO date (YYYY-MM-DD) with its day name as "Fri 20 Feb".
@@ -204,6 +239,11 @@ function detectTimecardDiscrepancy(scheduleData, timecardData, dateOverride) {
  * @param {{ entries: Array<Record<string, string | null>> }} newData
  * @returns {string[] | null}
  */
+/**
+ * @param {{ entries: Array<Record<string, string | null>> } | null} oldData
+ * @param {{ entries: Array<Record<string, string | null>> }} newData
+ * @returns {string[] | null}
+ */
 function detectTimecardChanges(oldData, newData) {
   if (!oldData) return null;
 
@@ -215,33 +255,66 @@ function detectTimecardChanges(oldData, newData) {
   for (const e of newData.entries) {
     const label = formatDdmm(e.day, e.date);
     const prev = oldEntries[e.date];
+
     if (!prev) {
-      const details = [];
-      if (e.clockIn1) details.push(`  Clock In:    ${e.clockIn1}`);
-      if (e.clockOut1) details.push(`  Clock Out:   ${e.clockOut1}`);
-      if (e.clockIn2) details.push(`  Clock In 2:  ${e.clockIn2}`);
-      if (e.clockOut2) details.push(`  Clock Out 2: ${e.clockOut2}`);
-      if (e.payCode) details.push(`  Pay Code:    ${e.payCode}`);
-      if (e.shiftTotal) details.push(`  Shift Total: ${e.shiftTotal}`);
-      if (e.dailyTotal) details.push(`  Daily Total: ${e.dailyTotal}`);
-      if (details.length > 0) {
-        changes.push(`${label} — New\n${details.join("\n")}`);
+      const lines = [];
+      const pairs = formatClockPairs(e);
+      if (pairs) lines.push(`  ${pairs}`);
+      if (e.payCode) lines.push(`  Pay Code: ${e.payCode}`);
+      if (e.dailyTotal) lines.push(`  Daily Total: ${e.dailyTotal}`);
+      if (lines.length > 0) {
+        changes.push(`${label} — New\n${lines.join("\n")}`);
       }
       continue;
     }
-    const fields = ["clockIn1", "clockOut1", "clockIn2", "clockOut2", "payCode", "amount", "shiftTotal", "dailyTotal"];
-    const diffs = [];
-    for (const f of fields) {
-      if (prev[f] !== e[f]) {
-        diffs.push(`  ${FIELD_LABELS[f]}: ${prev[f] ?? "—"} → ${e[f] ?? "—"}`);
+
+    const lines = [];
+    const clockChanged = prev.clockIn1 !== e.clockIn1 || prev.clockOut1 !== e.clockOut1 ||
+                          prev.clockIn2 !== e.clockIn2 || prev.clockOut2 !== e.clockOut2;
+    if (clockChanged) {
+      const oldPairs = formatClockPairs(prev);
+      const newPairs = formatClockPairs(e);
+      if (oldPairs || newPairs) {
+        lines.push(`  Was: ${oldPairs ?? "—"}`);
+        lines.push(`  Now: ${newPairs ?? "—"}`);
       }
     }
-    if (diffs.length > 0) {
-      changes.push(`${label} — Changed\n${diffs.join("\n")}`);
+    for (const f of ["payCode", "amount"]) {
+      if (prev[f] !== e[f]) {
+        lines.push(`  ${FIELD_LABELS[f]}: ${prev[f] ?? "—"} → ${e[f] ?? "—"}`);
+      }
+    }
+    if (prev.dailyTotal !== e.dailyTotal) {
+      lines.push(`  Daily Total: ${prev.dailyTotal ?? "—"} → ${e.dailyTotal ?? "—"}`);
+    }
+    if (lines.length > 0) {
+      changes.push(`${label} — Changed\n${lines.join("\n")}`);
     }
   }
 
   return changes.length > 0 ? changes : null;
+}
+
+/**
+ * Detect mismatches between calculated daily total (from clock pairs)
+ * and the scraped daily total reported by UKG.
+ * @param {{ entries: Array<Record<string, string | null>> } | null} timecardData
+ * @returns {string[] | null}
+ */
+function detectTotalMismatch(timecardData) {
+  if (!timecardData) return null;
+
+  const mismatches = [];
+  for (const e of timecardData.entries) {
+    const calculated = calculateDailyTotal(e);
+    if (!calculated || !e.dailyTotal) continue;
+    if (calculated !== e.dailyTotal) {
+      const label = formatDdmm(e.day, e.date);
+      mismatches.push(`${label}\n  ${formatClockPairs(e)}\n  Calculated: ${calculated}\n  Reported:   ${e.dailyTotal}`);
+    }
+  }
+
+  return mismatches.length > 0 ? mismatches : null;
 }
 
 // --- Email ---
@@ -329,6 +402,11 @@ async function main() {
     if (timecardChanges) {
       alerts.push(formatAlert("TIMECARD CHANGES", timecardChanges));
     }
+
+    const totalMismatch = detectTotalMismatch(timecardData);
+    if (totalMismatch) {
+      alerts.push(formatAlert("TIMECARD TOTAL MISMATCH", totalMismatch));
+    }
   }
 
   // Send email if there are alerts
@@ -337,6 +415,7 @@ async function main() {
     if (alerts.some((a) => a.startsWith("SCHEDULE"))) subjects.push("Schedule changed");
     if (alerts.some((a) => a.startsWith("TIMECARD vs"))) subjects.push("Timecard mismatch");
     if (alerts.some((a) => a.startsWith("TIMECARD CHANGES"))) subjects.push("Timecard changed");
+    if (alerts.some((a) => a.startsWith("TIMECARD TOTAL"))) subjects.push("Total mismatch");
     if (alerts.some((a) => a.includes("FAILED"))) subjects.push("Scraper error");
 
     const subject = `UKG Alert: ${subjects.join(", ") || "Changes detected"}`;
@@ -354,7 +433,10 @@ async function main() {
   log("Done.");
 }
 
-export { formatShift, detectScheduleChanges, detectTimecardDiscrepancy, detectTimecardChanges, parseTime, formatAlert };
+export {
+  formatShift, detectScheduleChanges, detectTimecardDiscrepancy, detectTimecardChanges,
+  parseTime, formatAlert, calculateDailyTotal, formatClockPairs, detectTotalMismatch,
+};
 
 const isMainModule = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 if (isMainModule) {

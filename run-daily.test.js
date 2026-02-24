@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { formatShift, detectScheduleChanges, detectTimecardDiscrepancy, detectTimecardChanges, parseTime, formatAlert } from "./run-daily.js";
+import {
+  formatShift, detectScheduleChanges, detectTimecardDiscrepancy,
+  detectTimecardChanges, parseTime, formatAlert,
+  calculateDailyTotal, formatClockPairs, detectTotalMismatch,
+} from "./run-daily.js";
 
 // --- parseTime ---
 
@@ -39,6 +43,46 @@ test("formatShift: no time, no off, but has note (raw details)", () => {
 
 test("formatShift: no time, no off, no note", () => {
   assert.strictEqual(formatShift({ start: null, end: null, off: false, note: null }), "No details");
+});
+
+// --- calculateDailyTotal ---
+
+test("calculateDailyTotal: single clock pair", () => {
+  assert.strictEqual(calculateDailyTotal({ clockIn1: "9:00", clockOut1: "17:00" }), "8:00");
+});
+
+test("calculateDailyTotal: two clock pairs", () => {
+  const entry = { clockIn1: "13:56", clockOut1: "16:36", clockIn2: "16:51", clockOut2: "19:26" };
+  assert.strictEqual(calculateDailyTotal(entry), "5:15");
+});
+
+test("calculateDailyTotal: no complete pairs returns null", () => {
+  assert.strictEqual(calculateDailyTotal({ clockIn1: "9:00", clockOut1: null }), null);
+  assert.strictEqual(calculateDailyTotal({}), null);
+});
+
+test("calculateDailyTotal: short shift", () => {
+  assert.strictEqual(calculateDailyTotal({ clockIn1: "14:00", clockOut1: "14:30" }), "0:30");
+});
+
+// --- formatClockPairs ---
+
+test("formatClockPairs: single pair", () => {
+  assert.strictEqual(formatClockPairs({ clockIn1: "9:00", clockOut1: "17:00" }), "9:00 - 17:00");
+});
+
+test("formatClockPairs: two pairs", () => {
+  const entry = { clockIn1: "13:56", clockOut1: "16:36", clockIn2: "16:51", clockOut2: "19:26" };
+  assert.strictEqual(formatClockPairs(entry), "13:56 - 16:36, 16:51 - 19:26");
+});
+
+test("formatClockPairs: no pairs returns null", () => {
+  assert.strictEqual(formatClockPairs({}), null);
+  assert.strictEqual(formatClockPairs({ clockIn1: null, clockOut1: null }), null);
+});
+
+test("formatClockPairs: incomplete pair shows question mark", () => {
+  assert.strictEqual(formatClockPairs({ clockIn1: "9:00", clockOut1: null }), "9:00 - ?");
 });
 
 // --- detectScheduleChanges ---
@@ -144,65 +188,94 @@ test("detectTimecardChanges: no changes returns null", () => {
   assert.strictEqual(detectTimecardChanges(data, data), null);
 });
 
-test("detectTimecardChanges: changed clock times detected with readable labels", () => {
-  const oldData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
-  const newData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "8:45", clockOut1: "17:30" }] };
+test("detectTimecardChanges: changed clocks shown as Was/Now pairs", () => {
+  const oldData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00", dailyTotal: "8:00" }] };
+  const newData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "8:45", clockOut1: "17:30", dailyTotal: "8:45" }] };
   const result = detectTimecardChanges(oldData, newData);
   assert.ok(result);
   assert.strictEqual(result.length, 1);
   assert.ok(result[0].includes("Fri 20 Feb"));
-  assert.ok(result[0].includes("Clock In"));
-  assert.ok(result[0].includes("9:00 → 8:45"));
-  assert.ok(result[0].includes("Clock Out"));
-  assert.ok(result[0].includes("17:00 → 17:30"));
-  // Should NOT contain camelCase field names
+  assert.ok(result[0].includes("Was:"));
+  assert.ok(result[0].includes("9:00 - 17:00"));
+  assert.ok(result[0].includes("Now:"));
+  assert.ok(result[0].includes("8:45 - 17:30"));
+  assert.ok(result[0].includes("Daily Total"));
+  assert.ok(result[0].includes("8:00 → 8:45"));
   assert.ok(!result[0].includes("clockIn1"));
-  assert.ok(!result[0].includes("clockOut1"));
+  assert.ok(!result[0].includes("Shift Total"));
 });
 
-test("detectTimecardChanges: new entry shows clock times", () => {
+test("detectTimecardChanges: new entry shows clock pairs and daily total", () => {
   const oldData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
   const newData = {
     entries: [
       { date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" },
-      { date: "21/02", day: "Sat", clockIn1: "8:00", clockOut1: "16:00", shiftTotal: "8:00" },
+      { date: "21/02", day: "Sat", clockIn1: "8:00", clockOut1: "16:00", dailyTotal: "8:00" },
     ],
   };
   const result = detectTimecardChanges(oldData, newData);
   assert.ok(result);
   assert.strictEqual(result.length, 1);
   assert.ok(result[0].includes("Sat 21 Feb"));
-  assert.ok(result[0].includes("New"));
-  assert.ok(result[0].includes("Clock In"));
-  assert.ok(result[0].includes("8:00"));
-  assert.ok(result[0].includes("Clock Out"));
-  assert.ok(result[0].includes("16:00"));
-  assert.ok(result[0].includes("Shift Total"));
+  assert.ok(result[0].includes("8:00 - 16:00"));
+  assert.ok(result[0].includes("Daily Total: 8:00"));
+  assert.ok(!result[0].includes("Clock In:"));
+  assert.ok(!result[0].includes("Shift Total"));
 });
 
-test("detectTimecardChanges: new entry with no data shows day off", () => {
+test("detectTimecardChanges: new entry with no data is skipped", () => {
   const oldData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
   const newData = {
     entries: [
       { date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" },
-      { date: "21/02", day: "Sat", clockIn1: null, clockOut1: null, shiftTotal: null, dailyTotal: null },
+      { date: "21/02", day: "Sat", clockIn1: null, clockOut1: null, dailyTotal: null },
     ],
   };
   const result = detectTimecardChanges(oldData, newData);
-  // An entry with no data shouldn't be reported as a change
   assert.strictEqual(result, null);
 });
 
-test("detectTimecardChanges: multiple fields changed shown on separate lines", () => {
-  const oldData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00", dailyTotal: "8:00", shiftTotal: "8:00" }] };
-  const newData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "8:00", clockOut1: "18:00", dailyTotal: "10:00", shiftTotal: "10:00" }] };
+test("detectTimecardChanges: pay code change shown alongside clock change", () => {
+  const oldData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00", dailyTotal: "8:00", payCode: null }] };
+  const newData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "8:00", clockOut1: "18:00", dailyTotal: "10:00", payCode: "Overtime" }] };
   const result = detectTimecardChanges(oldData, newData);
   assert.ok(result);
-  const lines = result[0].split("\n");
-  // Header line + 4 changed fields = 5 lines
-  assert.ok(lines.length >= 5);
-  assert.ok(result[0].includes("Shift Total"));
+  assert.ok(result[0].includes("Was:"));
+  assert.ok(result[0].includes("Now:"));
+  assert.ok(result[0].includes("Pay Code"));
   assert.ok(result[0].includes("Daily Total"));
+  assert.ok(!result[0].includes("Shift Total"));
+});
+
+// --- detectTotalMismatch ---
+
+test("detectTotalMismatch: matching totals returns null", () => {
+  const data = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00", dailyTotal: "8:00" }] };
+  assert.strictEqual(detectTotalMismatch(data), null);
+});
+
+test("detectTotalMismatch: mismatched totals returns alert", () => {
+  const data = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00", dailyTotal: "7:30" }] };
+  const result = detectTotalMismatch(data);
+  assert.ok(result);
+  assert.strictEqual(result.length, 1);
+  assert.ok(result[0].includes("Fri 20 Feb"));
+  assert.ok(result[0].includes("8:00"));
+  assert.ok(result[0].includes("7:30"));
+});
+
+test("detectTotalMismatch: skips entries without complete clock pairs", () => {
+  const data = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: null, dailyTotal: "8:00" }] };
+  assert.strictEqual(detectTotalMismatch(data), null);
+});
+
+test("detectTotalMismatch: null data returns null", () => {
+  assert.strictEqual(detectTotalMismatch(null), null);
+});
+
+test("detectTotalMismatch: skips entries without scraped total", () => {
+  const data = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00", dailyTotal: null }] };
+  assert.strictEqual(detectTotalMismatch(data), null);
 });
 
 // --- formatAlert ---
