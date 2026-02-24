@@ -230,13 +230,17 @@ async function scrapeTimecard(page) {
 
   console.error("[timecard] Parsing current period...");
   const currentEntries = await extractTimecardEntries(page);
+  console.error(`[timecard] Got ${currentEntries.length} entries from current period.`);
 
-  // Navigate to previous pay period and scrape it too
+  // Navigate to previous pay period and scrape it too.
+  // The #_timeFrame element is a custom AngularJS dropdown (span role="button"),
+  // not a native <select>. Click it to open the menu, then click the option.
   /** @type {TimecardEntry[]} */
   let previousEntries = [];
   try {
     console.error("[timecard] Navigating to previous period...");
-    await page.selectOption("#_timeFrame", { label: "Previous Pay Period" });
+    await page.click("#_timeFrame");
+    await page.getByText("Previous Pay Period", { exact: true }).click({ timeout: 5000 });
     await page.waitForTimeout(3000);
     previousEntries = await extractTimecardEntries(page);
     console.error(`[timecard] Got ${previousEntries.length} entries from previous period.`);
