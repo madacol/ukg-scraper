@@ -86,13 +86,13 @@ function formatIsoDate(day, isoDate) {
 }
 
 /**
- * Format an MM/DD date with its day name as "Fri 20 Feb".
+ * Format a DD/MM date with its day name as "Fri 20 Feb".
  * @param {string} day - Short day name
- * @param {string} mmdd - Date in MM/DD format
+ * @param {string} ddmm - Date in DD/MM format
  * @returns {string}
  */
-function formatMmdd(day, mmdd) {
-  const [mm, dd] = mmdd.split("/").map(Number);
+function formatDdmm(day, ddmm) {
+  const [dd, mm] = ddmm.split("/").map(Number);
   return `${day} ${dd} ${MONTHS[mm - 1]}`;
 }
 
@@ -171,9 +171,9 @@ function detectTimecardDiscrepancy(scheduleData, timecardData, dateOverride) {
   const todayShift = scheduleData.shifts.find((s) => s.date === todayStr && !s.off);
   if (!todayShift) return null;
 
-  // Timecard dates are MM/DD format — match against today
-  const mmdd = `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
-  const todayEntry = timecardData.entries.find((e) => e.date === mmdd);
+  // Timecard dates are DD/MM format — match against today
+  const ddmm = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const todayEntry = timecardData.entries.find((e) => e.date === ddmm);
   if (!todayEntry || (!todayEntry.clockIn1 && !todayEntry.clockOut1)) return null;
 
   const lines = [];
@@ -213,7 +213,7 @@ function detectTimecardChanges(oldData, newData) {
 
   const changes = [];
   for (const e of newData.entries) {
-    const label = formatMmdd(e.day, e.date);
+    const label = formatDdmm(e.day, e.date);
     const prev = oldEntries[e.date];
     if (!prev) {
       changes.push(`${label} — New entry`);

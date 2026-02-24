@@ -3,12 +3,13 @@ import assert from "node:assert";
 import { filterTimecardEntries } from "./scrape-all.js";
 
 // --- filterTimecardEntries ---
+// Timecard dates are in DD/MM format (European)
 
 test("filterTimecardEntries: keeps entries within last 14 days", () => {
   const entries = [
-    { date: "02/20", day: "Fri" },
-    { date: "02/15", day: "Sun" },
-    { date: "02/11", day: "Wed" },
+    { date: "20/02", day: "Fri" },
+    { date: "15/02", day: "Sun" },
+    { date: "11/02", day: "Wed" },
   ];
   const result = filterTimecardEntries(entries, "2026-02-24");
   assert.strictEqual(result.length, 3);
@@ -16,17 +17,17 @@ test("filterTimecardEntries: keeps entries within last 14 days", () => {
 
 test("filterTimecardEntries: excludes entries older than 14 days", () => {
   const entries = [
-    { date: "02/20", day: "Fri" },
-    { date: "02/09", day: "Mon" },
+    { date: "20/02", day: "Fri" },
+    { date: "09/02", day: "Mon" },
   ];
   const result = filterTimecardEntries(entries, "2026-02-24");
   assert.strictEqual(result.length, 1);
-  assert.strictEqual(result[0].date, "02/20");
+  assert.strictEqual(result[0].date, "20/02");
 });
 
 test("filterTimecardEntries: includes entry exactly 14 days ago", () => {
   const entries = [
-    { date: "02/10", day: "Tue" },
+    { date: "10/02", day: "Tue" },
   ];
   const result = filterTimecardEntries(entries, "2026-02-24");
   assert.strictEqual(result.length, 1);
@@ -34,38 +35,38 @@ test("filterTimecardEntries: includes entry exactly 14 days ago", () => {
 
 test("filterTimecardEntries: excludes entries after reference date", () => {
   const entries = [
-    { date: "02/25", day: "Wed" },
-    { date: "02/24", day: "Tue" },
+    { date: "25/02", day: "Wed" },
+    { date: "24/02", day: "Tue" },
   ];
   const result = filterTimecardEntries(entries, "2026-02-24");
   assert.strictEqual(result.length, 1);
-  assert.strictEqual(result[0].date, "02/24");
+  assert.strictEqual(result[0].date, "24/02");
 });
 
 test("filterTimecardEntries: handles month boundary", () => {
   const entries = [
-    { date: "02/01", day: "Sun" },
-    { date: "01/25", day: "Sun" },
-    { date: "01/17", day: "Sat" },
+    { date: "01/02", day: "Sun" },
+    { date: "25/01", day: "Sun" },
+    { date: "17/01", day: "Sat" },
   ];
-  // 02/01 - 14 days = 01/18, so 01/17 is excluded
+  // 01 Feb - 14 days = 18 Jan, so 17/01 is excluded
   const result = filterTimecardEntries(entries, "2026-02-01");
   assert.strictEqual(result.length, 2);
-  assert.strictEqual(result[0].date, "01/25");
-  assert.strictEqual(result[1].date, "02/01");
+  assert.strictEqual(result[0].date, "25/01");
+  assert.strictEqual(result[1].date, "01/02");
 });
 
 test("filterTimecardEntries: handles year boundary", () => {
   const entries = [
-    { date: "01/05", day: "Mon" },
-    { date: "12/28", day: "Sun" },
-    { date: "12/20", day: "Sat" },
+    { date: "05/01", day: "Mon" },
+    { date: "28/12", day: "Sun" },
+    { date: "20/12", day: "Sat" },
   ];
-  // 01/05 - 14 days = 12/22 (prev year), so 12/20 is excluded
+  // 05 Jan - 14 days = 22 Dec (prev year), so 20/12 is excluded
   const result = filterTimecardEntries(entries, "2026-01-05");
   assert.strictEqual(result.length, 2);
-  assert.strictEqual(result[0].date, "12/28");
-  assert.strictEqual(result[1].date, "01/05");
+  assert.strictEqual(result[0].date, "28/12");
+  assert.strictEqual(result[1].date, "05/01");
 });
 
 test("filterTimecardEntries: empty entries returns empty", () => {
@@ -75,8 +76,8 @@ test("filterTimecardEntries: empty entries returns empty", () => {
 
 test("filterTimecardEntries: deduplicates by date keeping last occurrence", () => {
   const entries = [
-    { date: "02/20", day: "Fri", clockIn1: "8:00" },
-    { date: "02/20", day: "Fri", clockIn1: "9:00" },
+    { date: "20/02", day: "Fri", clockIn1: "8:00" },
+    { date: "20/02", day: "Fri", clockIn1: "9:00" },
   ];
   const result = filterTimecardEntries(entries, "2026-02-24");
   assert.strictEqual(result.length, 1);
@@ -85,12 +86,12 @@ test("filterTimecardEntries: deduplicates by date keeping last occurrence", () =
 
 test("filterTimecardEntries: returns entries sorted by date ascending", () => {
   const entries = [
-    { date: "02/20", day: "Fri" },
-    { date: "02/15", day: "Sun" },
-    { date: "02/18", day: "Wed" },
+    { date: "20/02", day: "Fri" },
+    { date: "15/02", day: "Sun" },
+    { date: "18/02", day: "Wed" },
   ];
   const result = filterTimecardEntries(entries, "2026-02-24");
-  assert.strictEqual(result[0].date, "02/15");
-  assert.strictEqual(result[1].date, "02/18");
-  assert.strictEqual(result[2].date, "02/20");
+  assert.strictEqual(result[0].date, "15/02");
+  assert.strictEqual(result[1].date, "18/02");
+  assert.strictEqual(result[2].date, "20/02");
 });

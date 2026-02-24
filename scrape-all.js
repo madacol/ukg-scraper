@@ -45,15 +45,15 @@ import { formatDate, addDays, mapApiToShifts } from "./schedule-utils.js";
 const BASE_URL = "https://dunnes.prd.mykronos.com";
 
 /**
- * Resolve an MM/DD date string to a full Date, using the reference date's year.
+ * Resolve a DD/MM date string to a full Date, using the reference date's year.
  * Handles the Dec→Jan year boundary (Dec entries resolve to the previous year
  * when the reference date is in January).
- * @param {string} mmdd - Date in MM/DD format
+ * @param {string} ddmm - Date in DD/MM format
  * @param {Date} referenceDate
  * @returns {Date}
  */
-function resolveEntryDate(mmdd, referenceDate) {
-  const [mm, dd] = mmdd.split("/").map(Number);
+function resolveEntryDate(ddmm, referenceDate) {
+  const [dd, mm] = ddmm.split("/").map(Number);
   let year = referenceDate.getFullYear();
   if (mm === 12 && referenceDate.getMonth() === 0) {
     year--;

@@ -97,19 +97,19 @@ test("detectScheduleChanges: new day appears", () => {
 
 test("detectTimecardDiscrepancy: day off returns null", () => {
   const schedule = { shifts: [{ date: "2026-02-20", day: "Fri", start: null, end: null, off: true }] };
-  const timecard = { entries: [{ date: "02/20", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
+  const timecard = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
   assert.strictEqual(detectTimecardDiscrepancy(schedule, timecard, "2026-02-20"), null);
 });
 
 test("detectTimecardDiscrepancy: within threshold returns null", () => {
   const schedule = { shifts: [{ date: "2026-02-20", day: "Fri", start: "9:00", end: "17:00", off: false }] };
-  const timecard = { entries: [{ date: "02/20", day: "Fri", clockIn1: "8:50", clockOut1: "17:10" }] };
+  const timecard = { entries: [{ date: "20/02", day: "Fri", clockIn1: "8:50", clockOut1: "17:10" }] };
   assert.strictEqual(detectTimecardDiscrepancy(schedule, timecard, "2026-02-20"), null);
 });
 
 test("detectTimecardDiscrepancy: >50 min difference returns issues", () => {
   const schedule = { shifts: [{ date: "2026-02-20", day: "Fri", start: "9:00", end: "17:00", off: false }] };
-  const timecard = { entries: [{ date: "02/20", day: "Fri", clockIn1: "7:00", clockOut1: "19:00" }] };
+  const timecard = { entries: [{ date: "20/02", day: "Fri", clockIn1: "7:00", clockOut1: "19:00" }] };
   const result = detectTimecardDiscrepancy(schedule, timecard, "2026-02-20");
   assert.ok(result);
   assert.strictEqual(result.length, 1);
@@ -124,7 +124,7 @@ test("detectTimecardDiscrepancy: >50 min difference returns issues", () => {
 
 test("detectTimecardDiscrepancy: only clock-in mismatch", () => {
   const schedule = { shifts: [{ date: "2026-02-20", day: "Fri", start: "9:00", end: "17:00", off: false }] };
-  const timecard = { entries: [{ date: "02/20", day: "Fri", clockIn1: "7:00", clockOut1: null }] };
+  const timecard = { entries: [{ date: "20/02", day: "Fri", clockIn1: "7:00", clockOut1: null }] };
   const result = detectTimecardDiscrepancy(schedule, timecard, "2026-02-20");
   assert.ok(result);
   assert.strictEqual(result.length, 1);
@@ -135,18 +135,18 @@ test("detectTimecardDiscrepancy: only clock-in mismatch", () => {
 // --- detectTimecardChanges ---
 
 test("detectTimecardChanges: null old data returns null", () => {
-  const newData = { entries: [{ date: "02/20", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
+  const newData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
   assert.strictEqual(detectTimecardChanges(null, newData), null);
 });
 
 test("detectTimecardChanges: no changes returns null", () => {
-  const data = { entries: [{ date: "02/20", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
+  const data = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
   assert.strictEqual(detectTimecardChanges(data, data), null);
 });
 
 test("detectTimecardChanges: changed clock times detected with readable labels", () => {
-  const oldData = { entries: [{ date: "02/20", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
-  const newData = { entries: [{ date: "02/20", day: "Fri", clockIn1: "8:45", clockOut1: "17:30" }] };
+  const oldData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
+  const newData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "8:45", clockOut1: "17:30" }] };
   const result = detectTimecardChanges(oldData, newData);
   assert.ok(result);
   assert.strictEqual(result.length, 1);
@@ -161,11 +161,11 @@ test("detectTimecardChanges: changed clock times detected with readable labels",
 });
 
 test("detectTimecardChanges: new entry detected", () => {
-  const oldData = { entries: [{ date: "02/20", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
+  const oldData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
   const newData = {
     entries: [
-      { date: "02/20", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" },
-      { date: "02/21", day: "Sat", clockIn1: "8:00", clockOut1: "16:00" },
+      { date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" },
+      { date: "21/02", day: "Sat", clockIn1: "8:00", clockOut1: "16:00" },
     ],
   };
   const result = detectTimecardChanges(oldData, newData);
@@ -176,8 +176,8 @@ test("detectTimecardChanges: new entry detected", () => {
 });
 
 test("detectTimecardChanges: multiple fields changed shown on separate lines", () => {
-  const oldData = { entries: [{ date: "02/20", day: "Fri", clockIn1: "9:00", clockOut1: "17:00", dailyTotal: "8:00", shiftTotal: "8:00" }] };
-  const newData = { entries: [{ date: "02/20", day: "Fri", clockIn1: "8:00", clockOut1: "18:00", dailyTotal: "10:00", shiftTotal: "10:00" }] };
+  const oldData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00", dailyTotal: "8:00", shiftTotal: "8:00" }] };
+  const newData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "8:00", clockOut1: "18:00", dailyTotal: "10:00", shiftTotal: "10:00" }] };
   const result = detectTimecardChanges(oldData, newData);
   assert.ok(result);
   const lines = result[0].split("\n");
