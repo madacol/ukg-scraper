@@ -56,8 +56,62 @@ function loadLatest(name) {
   return JSON.parse(fs.readFileSync(p, "utf8"));
 }
 
+// --- Formatting helpers ---
+
+/** @type {readonly string[]} */
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** @type {Record<string, string>} */
+const FIELD_LABELS = {
+  clockIn1: "Clock In",
+  clockOut1: "Clock Out",
+  clockIn2: "Clock In 2",
+  clockOut2: "Clock Out 2",
+  payCode: "Pay Code",
+  amount: "Amount",
+  shiftTotal: "Shift Total",
+  dailyTotal: "Daily Total",
+};
+
+/**
+ * Format an ISO date (YYYY-MM-DD) with its day name as "Fri 20 Feb".
+ * @param {string} day - Short day name
+ * @param {string} isoDate - ISO date string
+ * @returns {string}
+ */
+function formatIsoDate(day, isoDate) {
+  const mm = parseInt(isoDate.slice(5, 7));
+  const dd = parseInt(isoDate.slice(8));
+  return `${day} ${dd} ${MONTHS[mm - 1]}`;
+}
+
+/**
+ * Format an MM/DD date with its day name as "Fri 20 Feb".
+ * @param {string} day - Short day name
+ * @param {string} mmdd - Date in MM/DD format
+ * @returns {string}
+ */
+function formatMmdd(day, mmdd) {
+  const [mm, dd] = mmdd.split("/").map(Number);
+  return `${day} ${dd} ${MONTHS[mm - 1]}`;
+}
+
+/**
+ * Format a section header with title and divider.
+ * @param {string} title
+ * @param {string[]} items
+ * @returns {string}
+ */
+function formatAlert(title, items) {
+  return `${title}\n${"-".repeat(title.length)}\n${items.join("\n\n")}`;
+}
+
 // --- Change detection ---
 
+/**
+ * @param {{ off: boolean, note?: string | null, start?: string | null, end?: string | null }} s
+ * @returns {string}
+ */
 function formatShift(s) {
   if (s.off) return s.note || "Day Off";
   if (s.start && s.end) return `${s.start}–${s.end}`;
@@ -65,6 +119,11 @@ function formatShift(s) {
   return "No details";
 }
 
+/**
+ * @param {{ shifts: Array<{ date: string, day: string, start: string | null, end: string | null, off: boolean, note?: string | null }> } | null} oldData
+ * @param {{ shifts: Array<{ date: string, day: string, start: string | null, end: string | null, off: boolean, note?: string | null }> }} newData
+ * @returns {string[] | null}
+ */
 function detectScheduleChanges(oldData, newData) {
   if (!oldData) return null;
 
@@ -73,19 +132,24 @@ function detectScheduleChanges(oldData, newData) {
 
   const changes = [];
   for (const s of newData.shifts) {
+    const label = formatIsoDate(s.day, s.date);
     const prev = oldShifts[s.date];
     if (!prev) {
-      changes.push(`  NEW: ${s.date} (${s.day}) — ${formatShift(s)}`);
+      changes.push(`${label} — New\n  ${formatShift(s)}`);
       continue;
     }
     if (prev.start !== s.start || prev.end !== s.end || prev.off !== s.off) {
-      changes.push(`  CHANGED: ${s.date} (${s.day}): ${formatShift(prev)} → ${formatShift(s)}`);
+      changes.push(`${label} — Changed\n  Was: ${formatShift(prev)}\n  Now: ${formatShift(s)}`);
     }
   }
 
   return changes.length > 0 ? changes : null;
 }
 
+/**
+ * @param {string | null | undefined} str
+ * @returns {number | null}
+ */
 function parseTime(str) {
   if (!str) return null;
   const m = str.match(/^(\d{1,2}):(\d{2})$/);
@@ -93,6 +157,12 @@ function parseTime(str) {
   return parseInt(m[1]) * 60 + parseInt(m[2]);
 }
 
+/**
+ * @param {{ shifts: Array<{ date: string, day: string, start: string | null, end: string | null, off: boolean }> } | null} scheduleData
+ * @param {{ entries: Array<{ date: string, day: string, clockIn1?: string | null, clockOut1?: string | null }> } | null} timecardData
+ * @param {string} [dateOverride]
+ * @returns {string[] | null}
+ */
 function detectTimecardDiscrepancy(scheduleData, timecardData, dateOverride) {
   if (!scheduleData || !timecardData) return null;
 
@@ -106,46 +176,58 @@ function detectTimecardDiscrepancy(scheduleData, timecardData, dateOverride) {
   const todayEntry = timecardData.entries.find((e) => e.date === mmdd);
   if (!todayEntry || (!todayEntry.clockIn1 && !todayEntry.clockOut1)) return null;
 
-  const issues = [];
+  const lines = [];
   const THRESHOLD = 50;
 
   if (todayEntry.clockIn1 && todayShift.start) {
     const diff = Math.abs(parseTime(todayEntry.clockIn1) - parseTime(todayShift.start));
     if (diff > THRESHOLD) {
-      issues.push(`  Clock-in ${todayEntry.clockIn1} vs scheduled ${todayShift.start} (${diff} min difference)`);
+      lines.push(`  Clock In:  ${todayEntry.clockIn1} (scheduled ${todayShift.start}, ${diff} min off)`);
     }
   }
 
   if (todayEntry.clockOut1 && todayShift.end) {
     const diff = Math.abs(parseTime(todayEntry.clockOut1) - parseTime(todayShift.end));
     if (diff > THRESHOLD) {
-      issues.push(`  Clock-out ${todayEntry.clockOut1} vs scheduled ${todayShift.end} (${diff} min difference)`);
+      lines.push(`  Clock Out: ${todayEntry.clockOut1} (scheduled ${todayShift.end}, ${diff} min off)`);
     }
   }
 
-  return issues.length > 0 ? issues : null;
+  if (lines.length === 0) return null;
+
+  const label = formatIsoDate(todayShift.day, todayStr);
+  return [`${label}\n${lines.join("\n")}`];
 }
 
+/**
+ * @param {{ entries: Array<Record<string, string | null>> } | null} oldData
+ * @param {{ entries: Array<Record<string, string | null>> }} newData
+ * @returns {string[] | null}
+ */
 function detectTimecardChanges(oldData, newData) {
   if (!oldData) return null;
 
+  /** @type {Record<string, Record<string, string | null>>} */
   const oldEntries = {};
   for (const e of oldData.entries) oldEntries[e.date] = e;
 
   const changes = [];
   for (const e of newData.entries) {
+    const label = formatMmdd(e.day, e.date);
     const prev = oldEntries[e.date];
     if (!prev) {
-      changes.push(`  NEW: ${e.date} (${e.day})`);
+      changes.push(`${label} — New entry`);
       continue;
     }
     const fields = ["clockIn1", "clockOut1", "clockIn2", "clockOut2", "payCode", "amount", "shiftTotal", "dailyTotal"];
     const diffs = [];
     for (const f of fields) {
-      if (prev[f] !== e[f]) diffs.push(`${f}: ${prev[f] ?? "—"} → ${e[f] ?? "—"}`);
+      if (prev[f] !== e[f]) {
+        diffs.push(`  ${FIELD_LABELS[f]}: ${prev[f] ?? "—"} → ${e[f] ?? "—"}`);
+      }
     }
     if (diffs.length > 0) {
-      changes.push(`  CHANGED: ${e.date} (${e.day}): ${diffs.join(", ")}`);
+      changes.push(`${label} — Changed\n${diffs.join("\n")}`);
     }
   }
 
@@ -221,30 +303,30 @@ async function main() {
   if (scheduleData) {
     const scheduleChanges = detectScheduleChanges(prevSchedule, scheduleData);
     if (scheduleChanges) {
-      alerts.push("Schedule changes detected:\n" + scheduleChanges.join("\n"));
+      alerts.push(formatAlert("SCHEDULE CHANGES", scheduleChanges));
     }
   }
 
   if (timecardData && scheduleData) {
     const discrepancy = detectTimecardDiscrepancy(scheduleData, timecardData);
     if (discrepancy) {
-      alerts.push("Timecard vs schedule discrepancy (>50 min):\n" + discrepancy.join("\n"));
+      alerts.push(formatAlert("TIMECARD vs SCHEDULE MISMATCH", discrepancy));
     }
   }
 
   if (timecardData) {
     const timecardChanges = detectTimecardChanges(prevTimecard, timecardData);
     if (timecardChanges) {
-      alerts.push("Timecard changes detected:\n" + timecardChanges.join("\n"));
+      alerts.push(formatAlert("TIMECARD CHANGES", timecardChanges));
     }
   }
 
   // Send email if there are alerts
   if (alerts.length > 0) {
     const subjects = [];
-    if (alerts.some((a) => a.includes("Schedule change"))) subjects.push("Schedule changed");
-    if (alerts.some((a) => a.includes("discrepancy"))) subjects.push("Timecard discrepancy");
-    if (alerts.some((a) => a.includes("Timecard change"))) subjects.push("Timecard changed");
+    if (alerts.some((a) => a.startsWith("SCHEDULE"))) subjects.push("Schedule changed");
+    if (alerts.some((a) => a.startsWith("TIMECARD vs"))) subjects.push("Timecard mismatch");
+    if (alerts.some((a) => a.startsWith("TIMECARD CHANGES"))) subjects.push("Timecard changed");
     if (alerts.some((a) => a.includes("FAILED"))) subjects.push("Scraper error");
 
     const subject = `UKG Alert: ${subjects.join(", ") || "Changes detected"}`;
@@ -262,7 +344,7 @@ async function main() {
   log("Done.");
 }
 
-export { formatShift, detectScheduleChanges, detectTimecardDiscrepancy, detectTimecardChanges, parseTime };
+export { formatShift, detectScheduleChanges, detectTimecardDiscrepancy, detectTimecardChanges, parseTime, formatAlert };
 
 const isMainModule = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 if (isMainModule) {
