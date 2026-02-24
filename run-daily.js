@@ -216,7 +216,17 @@ function detectTimecardChanges(oldData, newData) {
     const label = formatDdmm(e.day, e.date);
     const prev = oldEntries[e.date];
     if (!prev) {
-      changes.push(`${label} — New entry`);
+      const details = [];
+      if (e.clockIn1) details.push(`  Clock In:    ${e.clockIn1}`);
+      if (e.clockOut1) details.push(`  Clock Out:   ${e.clockOut1}`);
+      if (e.clockIn2) details.push(`  Clock In 2:  ${e.clockIn2}`);
+      if (e.clockOut2) details.push(`  Clock Out 2: ${e.clockOut2}`);
+      if (e.payCode) details.push(`  Pay Code:    ${e.payCode}`);
+      if (e.shiftTotal) details.push(`  Shift Total: ${e.shiftTotal}`);
+      if (e.dailyTotal) details.push(`  Daily Total: ${e.dailyTotal}`);
+      if (details.length > 0) {
+        changes.push(`${label} — New\n${details.join("\n")}`);
+      }
       continue;
     }
     const fields = ["clockIn1", "clockOut1", "clockIn2", "clockOut2", "payCode", "amount", "shiftTotal", "dailyTotal"];

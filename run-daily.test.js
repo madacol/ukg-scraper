@@ -160,12 +160,12 @@ test("detectTimecardChanges: changed clock times detected with readable labels",
   assert.ok(!result[0].includes("clockOut1"));
 });
 
-test("detectTimecardChanges: new entry detected", () => {
+test("detectTimecardChanges: new entry shows clock times", () => {
   const oldData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
   const newData = {
     entries: [
       { date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" },
-      { date: "21/02", day: "Sat", clockIn1: "8:00", clockOut1: "16:00" },
+      { date: "21/02", day: "Sat", clockIn1: "8:00", clockOut1: "16:00", shiftTotal: "8:00" },
     ],
   };
   const result = detectTimecardChanges(oldData, newData);
@@ -173,6 +173,24 @@ test("detectTimecardChanges: new entry detected", () => {
   assert.strictEqual(result.length, 1);
   assert.ok(result[0].includes("Sat 21 Feb"));
   assert.ok(result[0].includes("New"));
+  assert.ok(result[0].includes("Clock In"));
+  assert.ok(result[0].includes("8:00"));
+  assert.ok(result[0].includes("Clock Out"));
+  assert.ok(result[0].includes("16:00"));
+  assert.ok(result[0].includes("Shift Total"));
+});
+
+test("detectTimecardChanges: new entry with no data shows day off", () => {
+  const oldData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
+  const newData = {
+    entries: [
+      { date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" },
+      { date: "21/02", day: "Sat", clockIn1: null, clockOut1: null, shiftTotal: null, dailyTotal: null },
+    ],
+  };
+  const result = detectTimecardChanges(oldData, newData);
+  // An entry with no data shouldn't be reported as a change
+  assert.strictEqual(result, null);
 });
 
 test("detectTimecardChanges: multiple fields changed shown on separate lines", () => {
