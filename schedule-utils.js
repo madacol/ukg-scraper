@@ -18,9 +18,17 @@
  */
 
 /**
+ * @typedef {Object} ApiSegment
+ * @property {string} startDateTime - ISO datetime (YYYY-MM-DDTHH:MM:SS)
+ * @property {string} endDateTime - ISO datetime (YYYY-MM-DDTHH:MM:SS)
+ * @property {string} type - "REGULAR_SEGMENT" or "BREAK_SEGMENT"
+ */
+
+/**
  * @typedef {Object} RegularShift
  * @property {string} startDateTime - ISO datetime (YYYY-MM-DDTHH:MM:SS)
  * @property {string} endDateTime - ISO datetime (YYYY-MM-DDTHH:MM:SS)
+ * @property {ApiSegment[]} [segments] - Inner segments (regular + break)
  */
 
 /**
@@ -121,27 +129,26 @@ function mapApiToShifts(apiResponse) {
   /** @type {Map<string, Shift>} */
   const shiftsByDate = new Map();
 
-  // Map regular shifts, accumulating segments for same-date entries
+  // Map regular shifts, extracting inner REGULAR_SEGMENT entries
   for (const rs of regularShifts) {
     const date = rs.startDateTime.split("T")[0];
-    const segment = { start: formatTime(rs.startDateTime), end: formatTime(rs.endDateTime) };
-    const existing = shiftsByDate.get(date);
-    if (existing) {
-      existing.segments.push(segment);
-      existing.segments.sort((a, b) => parseHHMM(a.start) - parseHHMM(b.start));
-      existing.start = existing.segments[0].start;
-      existing.end = existing.segments[existing.segments.length - 1].end;
-    } else {
-      shiftsByDate.set(date, {
-        date,
-        day: dayOfWeek(date),
-        start: segment.start,
-        end: segment.end,
-        off: false,
-        note: null,
-        segments: [segment],
-      });
-    }
+    const innerSegments = (rs.segments || [])
+      .filter((seg) => seg.type === "REGULAR_SEGMENT")
+      .map((seg) => ({ start: formatTime(seg.startDateTime), end: formatTime(seg.endDateTime) }))
+      .sort((a, b) => parseHHMM(a.start) - parseHHMM(b.start));
+    // Fall back to outer start/end if no inner segments
+    const segments = innerSegments.length > 0
+      ? innerSegments
+      : [{ start: formatTime(rs.startDateTime), end: formatTime(rs.endDateTime) }];
+    shiftsByDate.set(date, {
+      date,
+      day: dayOfWeek(date),
+      start: segments[0].start,
+      end: segments[segments.length - 1].end,
+      off: false,
+      note: null,
+      segments,
+    });
   }
 
   // Map holidays (only add if no regular shift on that date; annotate if shift exists)

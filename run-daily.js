@@ -56,6 +56,46 @@ function loadLatest(name) {
   return JSON.parse(fs.readFileSync(p, "utf8"));
 }
 
+const BREAKS_PATH = path.join(DATA_DIR, "break-segments.json");
+
+/**
+ * Load the persistent break-segments cache (date → segments).
+ * @returns {Record<string, {start: string, end: string}[]>}
+ */
+function loadBreakSegments() {
+  if (!fs.existsSync(BREAKS_PATH)) return {};
+  return JSON.parse(fs.readFileSync(BREAKS_PATH, "utf8"));
+}
+
+/**
+ * Merge schedule segment data into the break-segments cache.
+ * Only stores dates that have >1 segment (i.e. a scheduled break).
+ * Prunes entries older than 30 days.
+ * @param {{ shifts: Array<{ date: string, segments: {start: string, end: string}[] }> }} scheduleData
+ * @param {boolean} persist - Whether to write to disk
+ * @returns {Record<string, {start: string, end: string}[]>}
+ */
+function updateBreakSegments(scheduleData, persist) {
+  const cache = loadBreakSegments();
+  for (const s of scheduleData.shifts) {
+    if (s.segments && s.segments.length > 1) {
+      cache[s.date] = s.segments;
+    }
+  }
+  // Prune entries older than 30 days
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 30);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  for (const date of Object.keys(cache)) {
+    if (date < cutoffStr) delete cache[date];
+  }
+  if (persist) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(BREAKS_PATH, JSON.stringify(cache, null, 2));
+  }
+  return cache;
+}
+
 // --- Formatting helpers ---
 
 /** @type {readonly string[]} */
@@ -155,10 +195,15 @@ function formatAlert(title, items) {
  */
 function formatShift(s) {
   if (s.off) return s.note || "Day Off";
-  if (s.segments && s.segments.length > 1) {
-    return s.segments.map((seg) => `${seg.start}–${seg.end}`).join(", ");
+  if (s.start && s.end) {
+    let text = `${s.start}–${s.end}`;
+    if (s.segments && s.segments.length > 1) {
+      const breakStart = s.segments[0].end;
+      const breakEnd = s.segments[1].start;
+      text += ` (break ${breakStart}–${breakEnd})`;
+    }
+    return text;
   }
-  if (s.start && s.end) return `${s.start}–${s.end}`;
   if (s.note) return s.note;
   return "No details";
 }
@@ -321,26 +366,19 @@ function detectTimecardChanges(oldData, newData) {
  * Detect mismatches between calculated daily total (from clock pairs)
  * and the scraped daily total reported by UKG.
  * @param {{ entries: Array<Record<string, string | null>> } | null} timecardData
- * @param {{ shifts: Array<{ date: string, segments: { start: string, end: string }[] }> } | null} [scheduleData]
+ * @param {Record<string, {start: string, end: string}[]>} [breakCache] - date → segments for dates with scheduled breaks
  * @returns {string[] | null}
  */
-function detectTotalMismatch(timecardData, scheduleData) {
+function detectTotalMismatch(timecardData, breakCache) {
   if (!timecardData) return null;
-
-  /** @type {Map<string, { start: string, end: string }[]>} */
-  const segmentsByDdmm = new Map();
-  if (scheduleData) {
-    for (const s of scheduleData.shifts) {
-      const [, mm, dd] = s.date.split("-");
-      const ddmm = `${dd}/${mm}`;
-      segmentsByDdmm.set(ddmm, s.segments || []);
-    }
-  }
 
   const mismatches = [];
   for (const e of timecardData.entries) {
-    const segments = segmentsByDdmm.get(e.date) || [];
-    const hasScheduledBreak = segments.length > 1;
+    // Convert DD/MM to YYYY-MM-DD for cache lookup (assume current year)
+    const [dd, mm] = (e.date || "").split("/");
+    const year = new Date().getFullYear();
+    const isoDate = dd && mm ? `${year}-${mm}-${dd}` : "";
+    const hasScheduledBreak = !!(breakCache && breakCache[isoDate]);
     const calculated = calculateDailyTotal(e, hasScheduledBreak);
     if (!calculated || !e.dailyTotal) continue;
     if (calculated !== e.dailyTotal) {
@@ -424,6 +462,12 @@ async function main() {
     alerts.push("Scraper FAILED:\n  " + err.message);
   }
 
+  // Update break-segments cache with current schedule
+  let breakCache = loadBreakSegments();
+  if (scheduleData) {
+    breakCache = updateBreakSegments(scheduleData, !dryRun);
+  }
+
   // Detect changes
   if (scheduleData) {
     const scheduleChanges = detectScheduleChanges(prevSchedule, scheduleData);
@@ -445,7 +489,7 @@ async function main() {
       alerts.push(formatAlert("TIMECARD CHANGES", timecardChanges));
     }
 
-    const totalMismatch = detectTotalMismatch(timecardData, scheduleData || null);
+    const totalMismatch = detectTotalMismatch(timecardData, breakCache);
     if (totalMismatch) {
       alerts.push(formatAlert("TIMECARD TOTAL MISMATCH", totalMismatch));
     }

@@ -45,13 +45,13 @@ test("formatShift: no time, no off, no note", () => {
   assert.strictEqual(formatShift({ start: null, end: null, off: false, note: null }), "No details");
 });
 
-test("formatShift: multi-segment shift shows all segments", () => {
+test("formatShift: multi-segment shift shows break", () => {
   assert.strictEqual(
     formatShift({
       start: "9:00", end: "14:05", off: false,
       segments: [{ start: "9:00", end: "13:00" }, { start: "13:25", end: "14:05" }],
     }),
-    "9:00–13:00, 13:25–14:05"
+    "9:00–14:05 (break 13:00–13:25)"
   );
 });
 
@@ -348,36 +348,31 @@ test("detectTotalMismatch: mismatched totals returns alert", () => {
   assert.ok(result[0].includes("7:30"));
 });
 
-test("detectTotalMismatch: scheduled break adds 5min bonus", () => {
-  // 2026-02-21 is a Saturday; segments > 1 means scheduled break
-  const schedule = { shifts: [{
-    date: "2026-02-21", day: "Sat", start: "9:00", end: "14:05", off: false,
-    segments: [{ start: "9:00", end: "13:00" }, { start: "13:25", end: "14:05" }],
-  }] };
+test("detectTotalMismatch: scheduled break adds 5min bonus via cache", () => {
+  const breakCache = {
+    "2026-02-21": [{ start: "9:00", end: "13:00" }, { start: "13:25", end: "14:05" }],
+  };
   const timecard = { entries: [{
     date: "21/02", day: "Sat",
     clockIn1: "9:00", clockOut1: "13:01", clockIn2: "13:26", clockOut2: "14:05",
     dailyTotal: "4:45",
   }] };
-  // With schedule info, the 5min bonus should be applied → 4:40 + 5 = 4:45 matches
-  assert.strictEqual(detectTotalMismatch(timecard, schedule), null);
+  assert.strictEqual(detectTotalMismatch(timecard, breakCache), null);
 });
 
-test("detectTotalMismatch: no bonus without scheduled break", () => {
-  const schedule = { shifts: [{
-    date: "2026-02-20", day: "Fri", start: "9:00", end: "17:00", off: false,
-    segments: [{ start: "9:00", end: "17:00" }],
-  }] };
+test("detectTotalMismatch: no bonus when date not in break cache", () => {
+  const breakCache = {};
   const timecard = { entries: [{
-    date: "20/02", day: "Fri",
-    clockIn1: "9:00", clockOut1: "17:00",
-    dailyTotal: "8:00",
+    date: "21/02", day: "Sat",
+    clockIn1: "9:00", clockOut1: "13:01", clockIn2: "13:26", clockOut2: "14:05",
+    dailyTotal: "4:45",
   }] };
-  assert.strictEqual(detectTotalMismatch(timecard, schedule), null);
+  const result = detectTotalMismatch(timecard, breakCache);
+  assert.ok(result);
+  assert.ok(result[0].includes("4:40"));
 });
 
-test("detectTotalMismatch: no bonus without schedule data even with two pairs", () => {
-  // No schedule data — should not infer break, so 4:40 != 4:45 is a mismatch
+test("detectTotalMismatch: no bonus without break cache at all", () => {
   const timecard = { entries: [{
     date: "21/02", day: "Sat",
     clockIn1: "9:00", clockOut1: "13:01", clockIn2: "13:26", clockOut2: "14:05",

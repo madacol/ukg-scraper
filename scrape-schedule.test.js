@@ -244,41 +244,57 @@ test("mapApiToShifts: deduplicates when shift and holiday fall on same date", ()
   assert.strictEqual(shifts[0].note, "St. Patrick's Day");
 });
 
-test("mapApiToShifts: multiple regularShifts on same date produce segments", () => {
+test("mapApiToShifts: extracts REGULAR_SEGMENT from inner segments, skips BREAK_SEGMENT", () => {
   const apiResponse = {
-    regularShifts: [
-      { startDateTime: "2026-02-21T09:00:00", endDateTime: "2026-02-21T13:00:00" },
-      { startDateTime: "2026-02-21T13:25:00", endDateTime: "2026-02-21T14:05:00" },
-    ],
+    regularShifts: [{
+      startDateTime: "2026-02-28T14:00:00",
+      endDateTime: "2026-02-28T19:00:00",
+      segments: [
+        { startDateTime: "2026-02-28T14:00:00", endDateTime: "2026-02-28T17:30:00", type: "REGULAR_SEGMENT" },
+        { startDateTime: "2026-02-28T17:30:00", endDateTime: "2026-02-28T17:45:00", type: "BREAK_SEGMENT" },
+        { startDateTime: "2026-02-28T17:45:00", endDateTime: "2026-02-28T19:00:00", type: "REGULAR_SEGMENT" },
+      ],
+    }],
     holidayList: [],
     timeOffRequests: [],
   };
   const shifts = mapApiToShifts(apiResponse);
   assert.strictEqual(shifts.length, 1);
-  assert.strictEqual(shifts[0].start, "9:00");
-  assert.strictEqual(shifts[0].end, "14:05");
+  assert.strictEqual(shifts[0].start, "14:00");
+  assert.strictEqual(shifts[0].end, "19:00");
   assert.deepStrictEqual(shifts[0].segments, [
-    { start: "9:00", end: "13:00" },
-    { start: "13:25", end: "14:05" },
+    { start: "14:00", end: "17:30" },
+    { start: "17:45", end: "19:00" },
   ]);
 });
 
-test("mapApiToShifts: segments are sorted by start time", () => {
+test("mapApiToShifts: falls back to outer times when no inner segments", () => {
   const apiResponse = {
-    regularShifts: [
-      { startDateTime: "2026-02-21T13:25:00", endDateTime: "2026-02-21T14:05:00" },
-      { startDateTime: "2026-02-21T09:00:00", endDateTime: "2026-02-21T13:00:00" },
-    ],
+    regularShifts: [{
+      startDateTime: "2026-02-21T09:00:00",
+      endDateTime: "2026-02-21T14:00:00",
+    }],
     holidayList: [],
     timeOffRequests: [],
   };
   const shifts = mapApiToShifts(apiResponse);
-  assert.strictEqual(shifts[0].start, "9:00");
-  assert.strictEqual(shifts[0].end, "14:05");
-  assert.deepStrictEqual(shifts[0].segments, [
-    { start: "9:00", end: "13:00" },
-    { start: "13:25", end: "14:05" },
-  ]);
+  assert.deepStrictEqual(shifts[0].segments, [{ start: "9:00", end: "14:00" }]);
+});
+
+test("mapApiToShifts: single regular segment with no break produces one segment", () => {
+  const apiResponse = {
+    regularShifts: [{
+      startDateTime: "2026-02-21T09:00:00",
+      endDateTime: "2026-02-21T14:00:00",
+      segments: [
+        { startDateTime: "2026-02-21T09:00:00", endDateTime: "2026-02-21T14:00:00", type: "REGULAR_SEGMENT" },
+      ],
+    }],
+    holidayList: [],
+    timeOffRequests: [],
+  };
+  const shifts = mapApiToShifts(apiResponse);
+  assert.deepStrictEqual(shifts[0].segments, [{ start: "9:00", end: "14:00" }]);
 });
 
 test("mapApiToShifts: formats hours without leading zero", () => {
