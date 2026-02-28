@@ -54,11 +54,17 @@ async function main() {
         const cell = (col) => {
           const el = document.getElementById(`${i}_${col}`);
           if (!el) return null;
-          const val = (el.getAttribute("title") || el.innerText || "").trim();
-          // For outpunch, title may contain notes before the time (e.g. "Bonus Applied; 18:45")
-          if (col.includes("punch") && val.includes(";")) {
-            return val.split(";").pop().trim() || null;
+          const isPunch = col.includes("punch");
+          if (isPunch) {
+            const timeRe = /\b(\d{1,2}:\d{2})\b/;
+            for (const raw of [el.getAttribute("title"), el.innerText]) {
+              if (!raw) continue;
+              const m = raw.match(timeRe);
+              if (m) return m[1];
+            }
+            return null;
           }
+          const val = (el.getAttribute("title") || el.innerText || "").trim();
           return val || null;
         };
 

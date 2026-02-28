@@ -103,6 +103,7 @@ function calculateDailyTotal(entry) {
     totalMinutes += out2 - in2;
   }
   if (totalMinutes <= 0) return null;
+  totalMinutes += 5; // UKG adds a 5-minute paid break bonus
   const hours = Math.floor(totalMinutes / 60);
   const mins = totalMinutes % 60;
   return `${hours}:${String(mins).padStart(2, "0")}`;

@@ -47,13 +47,13 @@ test("formatShift: no time, no off, no note", () => {
 
 // --- calculateDailyTotal ---
 
-test("calculateDailyTotal: single clock pair", () => {
-  assert.strictEqual(calculateDailyTotal({ clockIn1: "9:00", clockOut1: "17:00" }), "8:00");
+test("calculateDailyTotal: single clock pair includes 5min paid break", () => {
+  assert.strictEqual(calculateDailyTotal({ clockIn1: "9:00", clockOut1: "17:00" }), "8:05");
 });
 
-test("calculateDailyTotal: two clock pairs", () => {
+test("calculateDailyTotal: two clock pairs includes 5min paid break", () => {
   const entry = { clockIn1: "13:56", clockOut1: "16:36", clockIn2: "16:51", clockOut2: "19:26" };
-  assert.strictEqual(calculateDailyTotal(entry), "5:15");
+  assert.strictEqual(calculateDailyTotal(entry), "5:20");
 });
 
 test("calculateDailyTotal: no complete pairs returns null", () => {
@@ -61,8 +61,8 @@ test("calculateDailyTotal: no complete pairs returns null", () => {
   assert.strictEqual(calculateDailyTotal({}), null);
 });
 
-test("calculateDailyTotal: short shift", () => {
-  assert.strictEqual(calculateDailyTotal({ clockIn1: "14:00", clockOut1: "14:30" }), "0:30");
+test("calculateDailyTotal: short shift includes 5min paid break", () => {
+  assert.strictEqual(calculateDailyTotal({ clockIn1: "14:00", clockOut1: "14:30" }), "0:35");
 });
 
 // --- formatClockPairs ---
@@ -250,7 +250,7 @@ test("detectTimecardChanges: pay code change shown alongside clock change", () =
 // --- detectTotalMismatch ---
 
 test("detectTotalMismatch: matching totals returns null", () => {
-  const data = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00", dailyTotal: "8:00" }] };
+  const data = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00", dailyTotal: "8:05" }] };
   assert.strictEqual(detectTotalMismatch(data), null);
 });
 
@@ -260,7 +260,7 @@ test("detectTotalMismatch: mismatched totals returns alert", () => {
   assert.ok(result);
   assert.strictEqual(result.length, 1);
   assert.ok(result[0].includes("Fri 20 Feb"));
-  assert.ok(result[0].includes("8:00"));
+  assert.ok(result[0].includes("8:05"));
   assert.ok(result[0].includes("7:30"));
 });
 
