@@ -3,13 +3,18 @@
  */
 
 /**
+ * @typedef {{ start: string, end: string }} ShiftSegment
+ */
+
+/**
  * @typedef {Object} Shift
  * @property {string} date - ISO date string (YYYY-MM-DD)
  * @property {DayName} day
- * @property {string | null} start - Start time (H:MM) or null
- * @property {string | null} end - End time (H:MM) or null
+ * @property {string | null} start - Start time (H:MM) or null (first segment start)
+ * @property {string | null} end - End time (H:MM) or null (last segment end)
  * @property {boolean} off
  * @property {string | null} note
+ * @property {ShiftSegment[]} segments - Schedule segments (multiple when break is scheduled)
  */
 
 /**
@@ -94,6 +99,16 @@ function dayOfWeek(dateStr) {
 }
 
 /**
+ * Parse "H:MM" into total minutes for numeric comparison.
+ * @param {string} hhmm
+ * @returns {number}
+ */
+function parseHHMM(hhmm) {
+  const [h, m] = hhmm.split(":").map(Number);
+  return h * 60 + m;
+}
+
+/**
  * Convert a UKG schedule API response into a sorted array of Shift objects.
  * @param {ScheduleApiResponse} apiResponse
  * @returns {Shift[]}
@@ -106,17 +121,27 @@ function mapApiToShifts(apiResponse) {
   /** @type {Map<string, Shift>} */
   const shiftsByDate = new Map();
 
-  // Map regular shifts
+  // Map regular shifts, accumulating segments for same-date entries
   for (const rs of regularShifts) {
     const date = rs.startDateTime.split("T")[0];
-    shiftsByDate.set(date, {
-      date,
-      day: dayOfWeek(date),
-      start: formatTime(rs.startDateTime),
-      end: formatTime(rs.endDateTime),
-      off: false,
-      note: null,
-    });
+    const segment = { start: formatTime(rs.startDateTime), end: formatTime(rs.endDateTime) };
+    const existing = shiftsByDate.get(date);
+    if (existing) {
+      existing.segments.push(segment);
+      existing.segments.sort((a, b) => parseHHMM(a.start) - parseHHMM(b.start));
+      existing.start = existing.segments[0].start;
+      existing.end = existing.segments[existing.segments.length - 1].end;
+    } else {
+      shiftsByDate.set(date, {
+        date,
+        day: dayOfWeek(date),
+        start: segment.start,
+        end: segment.end,
+        off: false,
+        note: null,
+        segments: [segment],
+      });
+    }
   }
 
   // Map holidays (only add if no regular shift on that date; annotate if shift exists)
@@ -134,6 +159,7 @@ function mapApiToShifts(apiResponse) {
         end: null,
         off: true,
         note: name,
+        segments: [],
       });
     }
   }
@@ -153,6 +179,7 @@ function mapApiToShifts(apiResponse) {
           end: null,
           off: true,
           note,
+          segments: [],
         });
       }
     }

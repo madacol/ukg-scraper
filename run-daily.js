@@ -86,12 +86,14 @@ function formatClockPairs(entry) {
 
 /**
  * Calculate daily total from clock in/out pairs in H:MM format.
- * Adds 5 minutes on weekends to match UKG's paid break bonus.
+ * When `hasScheduledBreak` is true and the entry has a split shift (two clock pairs),
+ * adds 5 minutes to match UKG's paid break bonus.
  * Returns null if there are no complete pairs.
  * @param {Record<string, string | null | undefined>} entry
+ * @param {boolean} [hasScheduledBreak]
  * @returns {string | null}
  */
-function calculateDailyTotal(entry) {
+function calculateDailyTotal(entry, hasScheduledBreak) {
   let totalMinutes = 0;
   const in1 = parseTime(entry.clockIn1);
   const out1 = parseTime(entry.clockOut1);
@@ -104,8 +106,8 @@ function calculateDailyTotal(entry) {
     totalMinutes += out2 - in2;
   }
   if (totalMinutes <= 0) return null;
-  if (entry.day === "Sat" || entry.day === "Sun") {
-    totalMinutes += 5; // UKG adds a 5-minute paid break bonus on weekends
+  if (hasScheduledBreak && in2 !== null && out2 !== null) {
+    totalMinutes += 5; // UKG adds a 5-minute paid break bonus
   }
   const hours = Math.floor(totalMinutes / 60);
   const mins = totalMinutes % 60;
@@ -153,6 +155,9 @@ function formatAlert(title, items) {
  */
 function formatShift(s) {
   if (s.off) return s.note || "Day Off";
+  if (s.segments && s.segments.length > 1) {
+    return s.segments.map((seg) => `${seg.start}–${seg.end}`).join(", ");
+  }
   if (s.start && s.end) return `${s.start}–${s.end}`;
   if (s.note) return s.note;
   return "No details";
@@ -177,7 +182,8 @@ function detectScheduleChanges(oldData, newData) {
       changes.push(`${label} — New\n  ${formatShift(s)}`);
       continue;
     }
-    if (prev.start !== s.start || prev.end !== s.end || prev.off !== s.off) {
+    const segmentsChanged = JSON.stringify(prev.segments || []) !== JSON.stringify(s.segments || []);
+    if (prev.start !== s.start || prev.end !== s.end || prev.off !== s.off || segmentsChanged) {
       changes.push(`${label} — Changed\n  Was: ${formatShift(prev)}\n  Now: ${formatShift(s)}`);
     }
   }
@@ -217,18 +223,26 @@ function detectTimecardDiscrepancy(scheduleData, timecardData, dateOverride) {
 
   const lines = [];
   const THRESHOLD = 50;
+  const segments = todayShift.segments || [{ start: todayShift.start, end: todayShift.end }];
 
-  if (todayEntry.clockIn1 && todayShift.start) {
-    const diff = Math.abs(parseTime(todayEntry.clockIn1) - parseTime(todayShift.start));
-    if (diff > THRESHOLD) {
-      lines.push(`  Clock In:  ${todayEntry.clockIn1} (scheduled ${todayShift.start}, ${diff} min off)`);
+  /** @type {Array<{ inKey: string, outKey: string, label: string, segment: { start: string | null, end: string | null } }>} */
+  const pairs = [
+    { inKey: "clockIn1", outKey: "clockOut1", label: "", segment: segments[0] },
+    { inKey: "clockIn2", outKey: "clockOut2", label: "2", segment: segments[1] || segments[0] },
+  ];
+
+  for (const { inKey, outKey, label, segment } of pairs) {
+    if (todayEntry[inKey] && segment.start) {
+      const diff = Math.abs(parseTime(todayEntry[inKey]) - parseTime(segment.start));
+      if (diff > THRESHOLD) {
+        lines.push(`  Clock In${label}:  ${todayEntry[inKey]} (scheduled ${segment.start}, ${diff} min off)`);
+      }
     }
-  }
-
-  if (todayEntry.clockOut1 && todayShift.end) {
-    const diff = Math.abs(parseTime(todayEntry.clockOut1) - parseTime(todayShift.end));
-    if (diff > THRESHOLD) {
-      lines.push(`  Clock Out: ${todayEntry.clockOut1} (scheduled ${todayShift.end}, ${diff} min off)`);
+    if (todayEntry[outKey] && segment.end) {
+      const diff = Math.abs(parseTime(todayEntry[outKey]) - parseTime(segment.end));
+      if (diff > THRESHOLD) {
+        lines.push(`  Clock Out${label}: ${todayEntry[outKey]} (scheduled ${segment.end}, ${diff} min off)`);
+      }
     }
   }
 
@@ -303,14 +317,27 @@ function detectTimecardChanges(oldData, newData) {
  * Detect mismatches between calculated daily total (from clock pairs)
  * and the scraped daily total reported by UKG.
  * @param {{ entries: Array<Record<string, string | null>> } | null} timecardData
+ * @param {{ shifts: Array<{ date: string, segments: { start: string, end: string }[] }> } | null} [scheduleData]
  * @returns {string[] | null}
  */
-function detectTotalMismatch(timecardData) {
+function detectTotalMismatch(timecardData, scheduleData) {
   if (!timecardData) return null;
+
+  /** @type {Map<string, { start: string, end: string }[]>} */
+  const segmentsByDdmm = new Map();
+  if (scheduleData) {
+    for (const s of scheduleData.shifts) {
+      const [, mm, dd] = s.date.split("-");
+      const ddmm = `${dd}/${mm}`;
+      segmentsByDdmm.set(ddmm, s.segments || []);
+    }
+  }
 
   const mismatches = [];
   for (const e of timecardData.entries) {
-    const calculated = calculateDailyTotal(e);
+    const segments = segmentsByDdmm.get(e.date) || [];
+    const hasScheduledBreak = segments.length > 1;
+    const calculated = calculateDailyTotal(e, hasScheduledBreak);
     if (!calculated || !e.dailyTotal) continue;
     if (calculated !== e.dailyTotal) {
       const label = formatDdmm(e.day, e.date);
@@ -407,7 +434,7 @@ async function main() {
       alerts.push(formatAlert("TIMECARD CHANGES", timecardChanges));
     }
 
-    const totalMismatch = detectTotalMismatch(timecardData);
+    const totalMismatch = detectTotalMismatch(timecardData, scheduleData || null);
     if (totalMismatch) {
       alerts.push(formatAlert("TIMECARD TOTAL MISMATCH", totalMismatch));
     }

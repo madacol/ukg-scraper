@@ -45,6 +45,26 @@ test("formatShift: no time, no off, no note", () => {
   assert.strictEqual(formatShift({ start: null, end: null, off: false, note: null }), "No details");
 });
 
+test("formatShift: multi-segment shift shows all segments", () => {
+  assert.strictEqual(
+    formatShift({
+      start: "9:00", end: "14:05", off: false,
+      segments: [{ start: "9:00", end: "13:00" }, { start: "13:25", end: "14:05" }],
+    }),
+    "9:00–13:00, 13:25–14:05"
+  );
+});
+
+test("formatShift: single segment uses start–end", () => {
+  assert.strictEqual(
+    formatShift({
+      start: "9:00", end: "14:00", off: false,
+      segments: [{ start: "9:00", end: "14:00" }],
+    }),
+    "9:00–14:00"
+  );
+});
+
 // --- calculateDailyTotal ---
 
 test("calculateDailyTotal: single clock pair on weekday", () => {
@@ -65,9 +85,16 @@ test("calculateDailyTotal: short shift on weekday", () => {
   assert.strictEqual(calculateDailyTotal({ day: "Mon", clockIn1: "14:00", clockOut1: "14:30" }), "0:30");
 });
 
-test("calculateDailyTotal: weekend adds 5min paid break bonus", () => {
-  assert.strictEqual(calculateDailyTotal({ day: "Sat", clockIn1: "9:00", clockOut1: "13:01", clockIn2: "13:26", clockOut2: "14:05" }), "4:45");
-  assert.strictEqual(calculateDailyTotal({ day: "Sun", clockIn1: "8:57", clockOut1: "11:43", clockIn2: "12:07", clockOut2: "14:15" }), "4:59");
+test("calculateDailyTotal: adds 5min when hasScheduledBreak is true", () => {
+  assert.strictEqual(calculateDailyTotal({ day: "Sat", clockIn1: "9:00", clockOut1: "13:01", clockIn2: "13:26", clockOut2: "14:05" }, true), "4:45");
+  assert.strictEqual(calculateDailyTotal({ day: "Sun", clockIn1: "8:57", clockOut1: "11:43", clockIn2: "12:07", clockOut2: "14:15" }, true), "4:59");
+  // Also works on weekdays with scheduled break
+  assert.strictEqual(calculateDailyTotal({ day: "Mon", clockIn1: "9:00", clockOut1: "13:00", clockIn2: "13:25", clockOut2: "14:05" }, true), "4:45");
+});
+
+test("calculateDailyTotal: no bonus without hasScheduledBreak", () => {
+  assert.strictEqual(calculateDailyTotal({ day: "Sat", clockIn1: "9:00", clockOut1: "13:01", clockIn2: "13:26", clockOut2: "14:05" }), "4:40");
+  assert.strictEqual(calculateDailyTotal({ day: "Mon", clockIn1: "9:00", clockOut1: "13:00", clockIn2: "13:25", clockOut2: "14:05" }), "4:40");
 });
 
 // --- formatClockPairs ---
@@ -142,6 +169,28 @@ test("detectScheduleChanges: new day appears", () => {
   assert.ok(result[0].includes("8:00–16:00"));
 });
 
+test("detectScheduleChanges: segment change detected", () => {
+  const oldData = { shifts: [{
+    date: "2026-02-21", day: "Sat", start: "9:00", end: "14:05", off: false,
+    segments: [{ start: "9:00", end: "13:00" }, { start: "13:25", end: "14:05" }],
+  }] };
+  const newData = { shifts: [{
+    date: "2026-02-21", day: "Sat", start: "9:00", end: "14:05", off: false,
+    segments: [{ start: "9:00", end: "13:00" }, { start: "13:30", end: "14:05" }],
+  }] };
+  const result = detectScheduleChanges(oldData, newData);
+  assert.ok(result);
+  assert.ok(result[0].includes("Changed"));
+});
+
+test("detectScheduleChanges: same segments returns null", () => {
+  const data = { shifts: [{
+    date: "2026-02-21", day: "Sat", start: "9:00", end: "14:05", off: false,
+    segments: [{ start: "9:00", end: "13:00" }, { start: "13:25", end: "14:05" }],
+  }] };
+  assert.strictEqual(detectScheduleChanges(data, data), null);
+});
+
 // --- detectTimecardDiscrepancy ---
 
 test("detectTimecardDiscrepancy: day off returns null", () => {
@@ -179,6 +228,36 @@ test("detectTimecardDiscrepancy: only clock-in mismatch", () => {
   assert.strictEqual(result.length, 1);
   assert.ok(result[0].includes("Clock In"));
   assert.ok(!result[0].includes("Clock Out"));
+});
+
+test("detectTimecardDiscrepancy: compares clock pairs against segments", () => {
+  const schedule = { shifts: [{
+    date: "2026-02-21", day: "Sat", start: "9:00", end: "14:05", off: false,
+    segments: [{ start: "9:00", end: "13:00" }, { start: "13:25", end: "14:05" }],
+  }] };
+  const timecard = { entries: [{
+    date: "21/02", day: "Sat",
+    clockIn1: "9:00", clockOut1: "13:01",
+    clockIn2: "13:26", clockOut2: "14:05",
+  }] };
+  // All within threshold — should return null
+  assert.strictEqual(detectTimecardDiscrepancy(schedule, timecard, "2026-02-21"), null);
+});
+
+test("detectTimecardDiscrepancy: second pair mismatch with segments", () => {
+  const schedule = { shifts: [{
+    date: "2026-02-21", day: "Sat", start: "9:00", end: "14:05", off: false,
+    segments: [{ start: "9:00", end: "13:00" }, { start: "13:25", end: "14:05" }],
+  }] };
+  const timecard = { entries: [{
+    date: "21/02", day: "Sat",
+    clockIn1: "9:00", clockOut1: "13:01",
+    clockIn2: "15:30", clockOut2: "17:00",
+  }] };
+  const result = detectTimecardDiscrepancy(schedule, timecard, "2026-02-21");
+  assert.ok(result);
+  assert.ok(result[0].includes("Clock In2"));
+  assert.ok(result[0].includes("15:30"));
 });
 
 // --- detectTimecardChanges ---
@@ -267,6 +346,34 @@ test("detectTotalMismatch: mismatched totals returns alert", () => {
   assert.ok(result[0].includes("Fri 20 Feb"));
   assert.ok(result[0].includes("8:00"));
   assert.ok(result[0].includes("7:30"));
+});
+
+test("detectTotalMismatch: scheduled break adds 5min bonus", () => {
+  // 2026-02-21 is a Saturday; segments > 1 means scheduled break
+  const schedule = { shifts: [{
+    date: "2026-02-21", day: "Sat", start: "9:00", end: "14:05", off: false,
+    segments: [{ start: "9:00", end: "13:00" }, { start: "13:25", end: "14:05" }],
+  }] };
+  const timecard = { entries: [{
+    date: "21/02", day: "Sat",
+    clockIn1: "9:00", clockOut1: "13:01", clockIn2: "13:26", clockOut2: "14:05",
+    dailyTotal: "4:45",
+  }] };
+  // With schedule info, the 5min bonus should be applied → 4:40 + 5 = 4:45 matches
+  assert.strictEqual(detectTotalMismatch(timecard, schedule), null);
+});
+
+test("detectTotalMismatch: no bonus without scheduled break", () => {
+  const schedule = { shifts: [{
+    date: "2026-02-20", day: "Fri", start: "9:00", end: "17:00", off: false,
+    segments: [{ start: "9:00", end: "17:00" }],
+  }] };
+  const timecard = { entries: [{
+    date: "20/02", day: "Fri",
+    clockIn1: "9:00", clockOut1: "17:00",
+    dailyTotal: "8:00",
+  }] };
+  assert.strictEqual(detectTotalMismatch(timecard, schedule), null);
 });
 
 test("detectTotalMismatch: skips entries without complete clock pairs", () => {

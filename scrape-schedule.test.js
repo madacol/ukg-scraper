@@ -60,6 +60,7 @@ test("mapApiToShifts: maps regular shifts with correct date, times, and day", ()
     end: "14:00",
     off: false,
     note: null,
+    segments: [{ start: "9:00", end: "14:00" }],
   });
 });
 
@@ -108,6 +109,7 @@ test("mapApiToShifts: maps holidays as off days", () => {
     end: null,
     off: true,
     note: "St. Patrick's Day",
+    segments: [],
   });
 });
 
@@ -138,6 +140,7 @@ test("mapApiToShifts: maps time-off requests as off days", () => {
     end: null,
     off: true,
     note: "ROI Day Off Request TOR (Submitted)",
+    segments: [],
   });
 });
 
@@ -239,6 +242,43 @@ test("mapApiToShifts: deduplicates when shift and holiday fall on same date", ()
   assert.strictEqual(shifts[0].end, "14:00");
   assert.strictEqual(shifts[0].off, false);
   assert.strictEqual(shifts[0].note, "St. Patrick's Day");
+});
+
+test("mapApiToShifts: multiple regularShifts on same date produce segments", () => {
+  const apiResponse = {
+    regularShifts: [
+      { startDateTime: "2026-02-21T09:00:00", endDateTime: "2026-02-21T13:00:00" },
+      { startDateTime: "2026-02-21T13:25:00", endDateTime: "2026-02-21T14:05:00" },
+    ],
+    holidayList: [],
+    timeOffRequests: [],
+  };
+  const shifts = mapApiToShifts(apiResponse);
+  assert.strictEqual(shifts.length, 1);
+  assert.strictEqual(shifts[0].start, "9:00");
+  assert.strictEqual(shifts[0].end, "14:05");
+  assert.deepStrictEqual(shifts[0].segments, [
+    { start: "9:00", end: "13:00" },
+    { start: "13:25", end: "14:05" },
+  ]);
+});
+
+test("mapApiToShifts: segments are sorted by start time", () => {
+  const apiResponse = {
+    regularShifts: [
+      { startDateTime: "2026-02-21T13:25:00", endDateTime: "2026-02-21T14:05:00" },
+      { startDateTime: "2026-02-21T09:00:00", endDateTime: "2026-02-21T13:00:00" },
+    ],
+    holidayList: [],
+    timeOffRequests: [],
+  };
+  const shifts = mapApiToShifts(apiResponse);
+  assert.strictEqual(shifts[0].start, "9:00");
+  assert.strictEqual(shifts[0].end, "14:05");
+  assert.deepStrictEqual(shifts[0].segments, [
+    { start: "9:00", end: "13:00" },
+    { start: "13:25", end: "14:05" },
+  ]);
 });
 
 test("mapApiToShifts: formats hours without leading zero", () => {
