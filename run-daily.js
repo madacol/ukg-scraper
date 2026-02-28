@@ -86,6 +86,7 @@ function formatClockPairs(entry) {
 
 /**
  * Calculate daily total from clock in/out pairs in H:MM format.
+ * Adds 5 minutes on weekends to match UKG's paid break bonus.
  * Returns null if there are no complete pairs.
  * @param {Record<string, string | null | undefined>} entry
  * @returns {string | null}
@@ -103,7 +104,9 @@ function calculateDailyTotal(entry) {
     totalMinutes += out2 - in2;
   }
   if (totalMinutes <= 0) return null;
-  totalMinutes += 5; // UKG adds a 5-minute paid break bonus
+  if (entry.day === "Sat" || entry.day === "Sun") {
+    totalMinutes += 5; // UKG adds a 5-minute paid break bonus on weekends
+  }
   const hours = Math.floor(totalMinutes / 60);
   const mins = totalMinutes % 60;
   return `${hours}:${String(mins).padStart(2, "0")}`;
