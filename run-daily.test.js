@@ -376,6 +376,18 @@ test("detectTotalMismatch: no bonus without scheduled break", () => {
   assert.strictEqual(detectTotalMismatch(timecard, schedule), null);
 });
 
+test("detectTotalMismatch: no bonus without schedule data even with two pairs", () => {
+  // No schedule data — should not infer break, so 4:40 != 4:45 is a mismatch
+  const timecard = { entries: [{
+    date: "21/02", day: "Sat",
+    clockIn1: "9:00", clockOut1: "13:01", clockIn2: "13:26", clockOut2: "14:05",
+    dailyTotal: "4:45",
+  }] };
+  const result = detectTotalMismatch(timecard);
+  assert.ok(result);
+  assert.ok(result[0].includes("4:40"));
+});
+
 test("detectTotalMismatch: skips entries without complete clock pairs", () => {
   const data = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: null, dailyTotal: "8:00" }] };
   assert.strictEqual(detectTotalMismatch(data), null);

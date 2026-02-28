@@ -182,7 +182,11 @@ function detectScheduleChanges(oldData, newData) {
       changes.push(`${label} — New\n  ${formatShift(s)}`);
       continue;
     }
-    const segmentsChanged = JSON.stringify(prev.segments || []) !== JSON.stringify(s.segments || []);
+    const prevSegs = prev.segments;
+    const newSegs = s.segments;
+    const segmentsChanged = prevSegs && newSegs
+      ? JSON.stringify(prevSegs) !== JSON.stringify(newSegs)
+      : false;
     if (prev.start !== s.start || prev.end !== s.end || prev.off !== s.off || segmentsChanged) {
       changes.push(`${label} — Changed\n  Was: ${formatShift(prev)}\n  Now: ${formatShift(s)}`);
     }
@@ -377,6 +381,9 @@ async function sendEmail(config, subject, body) {
 // --- Main ---
 
 async function main() {
+  const dryRun = process.argv.includes("--dry-run");
+  if (dryRun) log("DRY RUN — no files saved, no email sent");
+
   const config = loadConfig();
   const date = today();
   const alerts = [];
@@ -399,14 +406,18 @@ async function main() {
 
     if (result.schedule) {
       scheduleData = result.schedule;
-      saveData("schedule", date, scheduleData);
-      log(`Schedule saved: data/schedule-${date}.json`);
+      if (!dryRun) {
+        saveData("schedule", date, scheduleData);
+        log(`Schedule saved: data/schedule-${date}.json`);
+      }
     }
 
     if (result.timecard) {
       timecardData = result.timecard;
-      saveData("timecard", date, timecardData);
-      log(`Timecard saved: data/timecard-${date}.json`);
+      if (!dryRun) {
+        saveData("timecard", date, timecardData);
+        log(`Timecard saved: data/timecard-${date}.json`);
+      }
     }
   } catch (err) {
     log(`Scraper failed: ${err.message}`);
@@ -452,10 +463,16 @@ async function main() {
     const subject = `UKG Alert: ${subjects.join(", ") || "Changes detected"}`;
     const body = `UKG Daily Run — ${date}\n${"=".repeat(40)}\n\n${alerts.join("\n\n")}\n`;
 
-    try {
-      await sendEmail(config, subject, body);
-    } catch (err) {
-      log(`Failed to send email: ${err.message}`);
+    log(`--- EMAIL PREVIEW ---\nSubject: ${subject}\n\n${body}--- END PREVIEW ---`);
+
+    if (dryRun) {
+      log("DRY RUN — email not sent");
+    } else {
+      try {
+        await sendEmail(config, subject, body);
+      } catch (err) {
+        log(`Failed to send email: ${err.message}`);
+      }
     }
   } else {
     log("No changes detected. No email sent.");
