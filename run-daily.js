@@ -304,20 +304,28 @@ function detectTimecardDiscrepancy(scheduleData, timecardData, dateOverride) {
 /**
  * @param {{ entries: Array<Record<string, string | null>> } | null} oldData
  * @param {{ entries: Array<Record<string, string | null>> }} newData
+ * @param {{ shifts: Array<{ date: string, day: string, start: string | null, end: string | null, off: boolean }> }} [scheduleData]
  * @returns {string[] | null}
  */
-/**
- * @param {{ entries: Array<Record<string, string | null>> } | null} oldData
- * @param {{ entries: Array<Record<string, string | null>> }} newData
- * @returns {string[] | null}
- */
-function detectTimecardChanges(oldData, newData) {
+function detectTimecardChanges(oldData, newData, scheduleData) {
   if (!oldData) return null;
 
   /** @type {Record<string, Record<string, string | null>>} */
   const oldEntries = {};
   for (const e of oldData.entries) oldEntries[e.date] = e;
 
+  // Build DD/MM → shift lookup from schedule data
+  /** @type {Record<string, { start: string | null, end: string | null, off: boolean }>} */
+  const shiftByDdmm = {};
+  if (scheduleData) {
+    for (const s of scheduleData.shifts) {
+      const mm = s.date.slice(5, 7);
+      const dd = s.date.slice(8);
+      shiftByDdmm[`${dd}/${mm}`] = s;
+    }
+  }
+
+  const THRESHOLD = 50;
   const changes = [];
   for (const e of newData.entries) {
     const label = formatDdmm(e.day, e.date);
@@ -330,6 +338,20 @@ function detectTimecardChanges(oldData, newData) {
       if (e.payCode) lines.push(`  Pay Code: ${e.payCode}`);
       if (e.dailyTotal) lines.push(`  Daily Total: ${e.dailyTotal}`);
       if (lines.length > 0) {
+        const shift = shiftByDdmm[e.date];
+        if (shift) {
+          const hasCompletePair = (e.clockIn1 && e.clockOut1) || (e.clockIn2 && e.clockOut2);
+          if (shift.off && !hasCompletePair) continue;
+          if (!shift.off && shift.start && shift.end) {
+            const inDiff = parseTime(e.clockIn1) !== null && parseTime(shift.start) !== null
+              ? Math.abs(parseTime(e.clockIn1) - parseTime(shift.start))
+              : Infinity;
+            const outDiff = parseTime(e.clockOut1) !== null && parseTime(shift.end) !== null
+              ? Math.abs(parseTime(e.clockOut1) - parseTime(shift.end))
+              : Infinity;
+            if (inDiff <= THRESHOLD && outDiff <= THRESHOLD) continue;
+          }
+        }
         changes.push(`${label} — New\n${lines.join("\n")}`);
       }
       continue;
@@ -484,7 +506,7 @@ async function main() {
   }
 
   if (timecardData) {
-    const timecardChanges = detectTimecardChanges(prevTimecard, timecardData);
+    const timecardChanges = detectTimecardChanges(prevTimecard, timecardData, scheduleData);
     if (timecardChanges) {
       alerts.push(formatAlert("TIMECARD CHANGES", timecardChanges));
     }

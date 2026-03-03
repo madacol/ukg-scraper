@@ -331,6 +331,81 @@ test("detectTimecardChanges: pay code change shown alongside clock change", () =
   assert.ok(!result[0].includes("Shift Total"));
 });
 
+test("detectTimecardChanges: new entry skipped when times match schedule", () => {
+  const oldData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
+  const newData = {
+    entries: [
+      { date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" },
+      { date: "21/02", day: "Sat", clockIn1: "8:03", clockOut1: "16:00", dailyTotal: "7:57" },
+    ],
+  };
+  const schedule = {
+    shifts: [{ date: "2026-02-21", day: "Sat", start: "8:00", end: "16:00", off: false }],
+  };
+  const result = detectTimecardChanges(oldData, newData, schedule);
+  assert.strictEqual(result, null);
+});
+
+test("detectTimecardChanges: new entry reported when times differ from schedule", () => {
+  const oldData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
+  const newData = {
+    entries: [
+      { date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" },
+      { date: "21/02", day: "Sat", clockIn1: "6:00", clockOut1: "16:00", dailyTotal: "10:00" },
+    ],
+  };
+  const schedule = {
+    shifts: [{ date: "2026-02-21", day: "Sat", start: "8:00", end: "16:00", off: false }],
+  };
+  const result = detectTimecardChanges(oldData, newData, schedule);
+  assert.ok(result);
+  assert.ok(result[0].includes("Sat 21 Feb"));
+});
+
+test("detectTimecardChanges: new leave entry on day off is skipped", () => {
+  const oldData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
+  const newData = {
+    entries: [
+      { date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" },
+      { date: "03/03", day: "Tue", clockIn1: "00:00", clockOut1: null, payCode: "Annual Leave Request" },
+    ],
+  };
+  const schedule = {
+    shifts: [{ date: "2026-03-03", day: "Tue", start: null, end: null, off: true }],
+  };
+  const result = detectTimecardChanges(oldData, newData, schedule);
+  assert.strictEqual(result, null);
+});
+
+test("detectTimecardChanges: new entry on day off with real clocks is reported", () => {
+  const oldData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
+  const newData = {
+    entries: [
+      { date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" },
+      { date: "21/02", day: "Sat", clockIn1: "8:00", clockOut1: "16:00", dailyTotal: "8:00" },
+    ],
+  };
+  const schedule = {
+    shifts: [{ date: "2026-02-21", day: "Sat", start: null, end: null, off: true }],
+  };
+  const result = detectTimecardChanges(oldData, newData, schedule);
+  assert.ok(result);
+  assert.ok(result[0].includes("Sat 21 Feb"));
+});
+
+test("detectTimecardChanges: without schedule data, behaves as before", () => {
+  const oldData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
+  const newData = {
+    entries: [
+      { date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" },
+      { date: "21/02", day: "Sat", clockIn1: "8:00", clockOut1: "16:00", dailyTotal: "8:00" },
+    ],
+  };
+  const result = detectTimecardChanges(oldData, newData);
+  assert.ok(result);
+  assert.ok(result[0].includes("Sat 21 Feb"));
+});
+
 // --- detectTotalMismatch ---
 
 test("detectTotalMismatch: matching totals returns null", () => {
