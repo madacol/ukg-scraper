@@ -339,10 +339,11 @@ function detectTimecardChanges(oldData, newData, scheduleData) {
       if (e.dailyTotal) lines.push(`  Daily Total: ${e.dailyTotal}`);
       if (lines.length > 0) {
         const shift = shiftByDdmm[e.date];
-        if (shift) {
+        if (scheduleData) {
           const hasCompletePair = (e.clockIn1 && e.clockOut1) || (e.clockIn2 && e.clockOut2);
-          if (shift.off && !hasCompletePair) continue;
-          if (!shift.off && shift.start && shift.end) {
+          const isOff = !shift || shift.off;
+          if (isOff && !hasCompletePair) continue;
+          if (shift && !shift.off && shift.start && shift.end) {
             const inDiff = parseTime(e.clockIn1) !== null && parseTime(shift.start) !== null
               ? Math.abs(parseTime(e.clockIn1) - parseTime(shift.start))
               : Infinity;

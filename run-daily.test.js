@@ -393,6 +393,22 @@ test("detectTimecardChanges: new entry on day off with real clocks is reported",
   assert.ok(result[0].includes("Sat 21 Feb"));
 });
 
+test("detectTimecardChanges: new leave entry skipped when date not in schedule", () => {
+  const oldData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
+  const newData = {
+    entries: [
+      { date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" },
+      { date: "04/03", day: "Wed", clockIn1: "00:00", clockOut1: null, payCode: "Annual Leave Request" },
+    ],
+  };
+  // Schedule exists but has no entry for 04/03
+  const schedule = {
+    shifts: [{ date: "2026-03-09", day: "Mon", start: "9:00", end: "14:00", off: false }],
+  };
+  const result = detectTimecardChanges(oldData, newData, schedule);
+  assert.strictEqual(result, null);
+});
+
 test("detectTimecardChanges: without schedule data, behaves as before", () => {
   const oldData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
   const newData = {
