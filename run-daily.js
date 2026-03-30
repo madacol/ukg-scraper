@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import nodemailer from "nodemailer";
+import { buildWebsiteTimecardData, saveWebsiteTimecardData } from "./website-data.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "data");
@@ -97,6 +98,20 @@ function saveData(name, date, data) {
   fs.writeFileSync(dated, json);
   fs.writeFileSync(latest, json);
   return dated;
+}
+
+function refreshWebsiteTimecard(date) {
+  const websiteTimecard = buildWebsiteTimecardData({
+    dataDir: DATA_DIR,
+    todayIso: date,
+    windowDays: 30,
+  });
+
+  if (!websiteTimecard) {
+    return null;
+  }
+
+  return saveWebsiteTimecardData(DATA_DIR, websiteTimecard);
 }
 
 function loadLatest(name) {
@@ -544,6 +559,10 @@ async function main() {
       if (!dryRun) {
         saveData("timecard", date, timecardData);
         log(`Timecard saved: data/timecard-${date}.json`);
+        const websitePath = refreshWebsiteTimecard(date);
+        if (websitePath) {
+          log(`Website timecard saved: ${path.relative(__dirname, websitePath)}`);
+        }
       }
     }
   } catch (err) {
