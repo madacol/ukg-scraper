@@ -38,11 +38,16 @@ function renderDay(day) {
   const timeRange = day.timeRange ? escapeHtml(day.timeRange) : null;
   const isOff = timeRange === "Off";
 
+  const hasPunches = Boolean(day.punches);
+
   /** @type {string[]} */
   const details = [];
 
-  if (day.punches) {
+  if (hasPunches) {
     details.push(`<span class="day-punches">${escapeHtml(day.punches)}</span>`);
+  }
+  if (hasPunches && timeRange && !isOff) {
+    details.push(`<span class="day-scheduled-label">Scheduled ${timeRange}</span>`);
   }
   if (day.breakLabel) {
     details.push(`<span class="day-break">${escapeHtml(day.breakLabel)}</span>`);
@@ -55,7 +60,7 @@ function renderDay(day) {
     <article class="${cls}" ${day.isToday ? 'id="today"' : ""}>
       <div class="day-left">
         <strong class="day-date">${escapeHtml(day.dateLabel)}</strong>
-        ${timeRange && !isOff ? `<span class="day-schedule">${timeRange}</span>` : ""}
+        ${timeRange && !isOff && !hasPunches ? `<span class="day-schedule">${timeRange}</span>` : ""}
         ${isOff ? `<span class="day-off">Off</span>` : ""}
         ${details.length > 0 ? `<div class="day-details">${details.join("")}</div>` : ""}
       </div>

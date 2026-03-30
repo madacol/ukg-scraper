@@ -1,16 +1,16 @@
 :root {
-  --bg: #fafafa;
-  --ink: #1a1a1a;
-  --muted: #777;
-  --subtle: #bbb;
-  --line: #e8e8e8;
-  --accent: #2563eb;
-  --accent-bg: #eff6ff;
-  --today-ring: #2563eb;
-  --off-color: #aaa;
-  --warn: #b45309;
-  --card-bg: #fff;
-  --shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --bg: #0f0f0f;
+  --ink: #e4e4e4;
+  --muted: #888;
+  --subtle: #555;
+  --line: #252525;
+  --accent: #60a5fa;
+  --accent-bg: rgba(96, 165, 250, 0.1);
+  --today-ring: #60a5fa;
+  --off-color: #555;
+  --warn: #fbbf24;
+  --card-bg: #181818;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   --radius: 12px;
 }
 
@@ -95,8 +95,8 @@ main {
   padding: 0.5rem 0.75rem;
   margin-bottom: 0.5rem;
   border-radius: var(--radius);
-  background: #fffbeb;
-  border: 1px solid #fde68a;
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.25);
   font-size: 0.82rem;
   color: var(--warn);
 }
@@ -110,7 +110,13 @@ main {
 }
 
 .issue-dot-error {
-  background: #dc2626;
+  background: #ef4444;
+}
+
+.day-scheduled-label {
+  font-size: 0.75rem;
+  color: var(--subtle);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── Timeline ── */
