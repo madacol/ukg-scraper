@@ -4,7 +4,44 @@ import {
   formatShift, detectScheduleChanges, detectTimecardDiscrepancy,
   detectTimecardChanges, parseTime, formatAlert,
   calculateDailyTotal, formatClockPairs, detectTotalMismatch,
+  parseScraperResult, tailOutput,
 } from "./run-daily.js";
+
+// --- scraper process helpers ---
+
+test("tailOutput: keeps only the last non-empty lines", () => {
+  const text = "\nline 1\n\nline 2\nline 3\n";
+  assert.strictEqual(tailOutput(text, 2), "line 2\nline 3");
+});
+
+test("parseScraperResult: returns structured errors from stdout on nonzero exit", () => {
+  const result = parseScraperResult({
+    status: 1,
+    stdout: JSON.stringify({
+      schedule: null,
+      timecard: null,
+      errors: ["Schedule scraper failed: timeout", "Timecard scraper failed: timeout"],
+    }),
+    stderr: "Logging in...\n[schedule] FAILED: timeout\n[timecard] FAILED: timeout\n",
+  });
+
+  assert.deepStrictEqual(result, {
+    schedule: null,
+    timecard: null,
+    errors: ["Schedule scraper failed: timeout", "Timecard scraper failed: timeout"],
+  });
+});
+
+test("parseScraperResult: throws stderr details when stdout is not structured JSON", () => {
+  assert.throws(
+    () => parseScraperResult({
+      status: 1,
+      stdout: "",
+      stderr: "Logging in...\nFatal: page.goto: Timeout 60000ms exceeded\n",
+    }),
+    /Scraper process failed \(exit code 1\)\nLogging in\.\.\.\nFatal: page\.goto: Timeout 60000ms exceeded/
+  );
+});
 
 // --- parseTime ---
 
@@ -449,6 +486,27 @@ test("detectTotalMismatch: scheduled break adds 5min bonus via cache", () => {
     dailyTotal: "4:45",
   }] };
   assert.strictEqual(detectTotalMismatch(timecard, breakCache), null);
+});
+
+test("detectTotalMismatch: raw total matching reported total suppresses split-shift false positives", () => {
+  const breakCache = {
+    "2026-03-14": [{ start: "14:00", end: "17:30" }, { start: "17:45", end: "19:00" }],
+  };
+  const timecard = { entries: [{
+    date: "14/03", day: "Sat",
+    clockIn1: "14:21", clockOut1: "18:00", clockIn2: "18:10", clockOut2: "18:52",
+    dailyTotal: "4:21",
+  }] };
+  assert.strictEqual(detectTotalMismatch(timecard, breakCache), null);
+});
+
+test("detectTotalMismatch: 1-minute drift is ignored", () => {
+  const data = { entries: [{
+    date: "28/03", day: "Sat",
+    clockIn1: "08:59", clockOut1: "12:25", clockIn2: "13:26", clockOut2: "19:06",
+    dailyTotal: "9:07",
+  }] };
+  assert.strictEqual(detectTotalMismatch(data), null);
 });
 
 test("detectTotalMismatch: no bonus when date not in break cache", () => {

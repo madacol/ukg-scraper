@@ -1,4 +1,4 @@
-import { execFileSync } from "child_process";
+import { spawnSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -27,17 +27,66 @@ function log(msg) {
 // --- Scraper runner ---
 
 /**
+ * Trim process output down to the last few non-empty lines for readable alerts.
+ * @param {string | null | undefined} value
+ * @param {number} [maxLines]
+ * @returns {string}
+ */
+function tailOutput(value, maxLines = 20) {
+  const lines = (value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter(Boolean);
+  return lines.slice(-maxLines).join("\n");
+}
+
+/**
+ * Normalize the scraper child-process result.
+ * Accepts structured JSON from stdout even when the process exits nonzero.
+ * @param {{ status: number | null, signal?: NodeJS.Signals | null, stdout?: string | null, stderr?: string | null, error?: Error }} result
+ * @returns {{ schedule: Object | null, timecard: Object | null, errors: string[] }}
+ */
+function parseScraperResult(result) {
+  if (result.error) {
+    throw result.error;
+  }
+
+  const stdout = result.stdout || "";
+  const stderr = result.stderr || "";
+  const trimmedStdout = stdout.trim();
+
+  if (trimmedStdout) {
+    try {
+      const parsed = JSON.parse(trimmedStdout);
+      return {
+        schedule: parsed.schedule ?? null,
+        timecard: parsed.timecard ?? null,
+        errors: Array.isArray(parsed.errors) ? parsed.errors : [],
+      };
+    } catch {
+      // Fall through to the unstructured error path below.
+    }
+  }
+
+  const statusInfo = result.signal
+    ? `signal ${result.signal}`
+    : `exit code ${result.status ?? "unknown"}`;
+  const details = tailOutput(stderr) || tailOutput(stdout) || "No output from scraper process";
+  throw new Error(`Scraper process failed (${statusInfo})\n${details}`);
+}
+
+/**
  * Run the unified scraper and return combined results.
  * @param {{ ukg: { username: string, password: string } }} config
  * @returns {{ schedule: Object | null, timecard: Object | null, errors: string[] }}
  */
 function runScrapers(config) {
-  const result = execFileSync(
+  const result = spawnSync(
     process.execPath,
     [path.join(__dirname, "scrape-all.js"), config.ukg.username, config.ukg.password],
-    { encoding: "utf8", timeout: 300_000, stdio: ["pipe", "pipe", "inherit"] }
+    { encoding: "utf8", timeout: 300_000, stdio: ["ignore", "pipe", "pipe"] }
   );
-  return JSON.parse(result);
+  return parseScraperResult(result);
 }
 
 function saveData(name, date, data) {
@@ -388,6 +437,8 @@ function detectTimecardChanges(oldData, newData, scheduleData) {
 /**
  * Detect mismatches between calculated daily total (from clock pairs)
  * and the scraped daily total reported by UKG.
+ * Accept either the raw clock total or the break-adjusted total, and ignore
+ * 1-minute drift to avoid noisy alerts from UKG rounding/edit metadata.
  * @param {{ entries: Array<Record<string, string | null>> } | null} timecardData
  * @param {Record<string, {start: string, end: string}[]>} [breakCache] - date → segments for dates with scheduled breaks
  * @returns {string[] | null}
@@ -396,14 +447,29 @@ function detectTotalMismatch(timecardData, breakCache) {
   if (!timecardData) return null;
 
   const mismatches = [];
+  const TOLERANCE_MINUTES = 1;
   for (const e of timecardData.entries) {
     // Convert DD/MM to YYYY-MM-DD for cache lookup (assume current year)
     const [dd, mm] = (e.date || "").split("/");
     const year = new Date().getFullYear();
     const isoDate = dd && mm ? `${year}-${mm}-${dd}` : "";
     const hasScheduledBreak = !!(breakCache && breakCache[isoDate]);
-    const calculated = calculateDailyTotal(e, hasScheduledBreak);
-    if (!calculated || !e.dailyTotal) continue;
+    const rawTotal = calculateDailyTotal(e);
+    const adjustedTotal = hasScheduledBreak ? calculateDailyTotal(e, true) : rawTotal;
+    if (!rawTotal || !e.dailyTotal) continue;
+
+    const reportedMinutes = parseTime(e.dailyTotal);
+    const rawMinutes = parseTime(rawTotal);
+    const adjustedMinutes = adjustedTotal ? parseTime(adjustedTotal) : null;
+    if (reportedMinutes === null || rawMinutes === null) continue;
+
+    const rawDiff = Math.abs(rawMinutes - reportedMinutes);
+    const adjustedDiff = adjustedMinutes === null ? rawDiff : Math.abs(adjustedMinutes - reportedMinutes);
+    if (Math.min(rawDiff, adjustedDiff) <= TOLERANCE_MINUTES) {
+      continue;
+    }
+
+    const calculated = adjustedDiff < rawDiff && adjustedTotal ? adjustedTotal : rawTotal;
     if (calculated !== e.dailyTotal) {
       const label = formatDdmm(e.day, e.date);
       mismatches.push(`${label}\n  ${formatClockPairs(e)}\n  Calculated: ${calculated}\n  Reported:   ${e.dailyTotal}`);
@@ -551,6 +617,7 @@ async function main() {
 export {
   formatShift, detectScheduleChanges, detectTimecardDiscrepancy, detectTimecardChanges,
   parseTime, formatAlert, calculateDailyTotal, formatClockPairs, detectTotalMismatch,
+  parseScraperResult, tailOutput,
 };
 
 const isMainModule = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
