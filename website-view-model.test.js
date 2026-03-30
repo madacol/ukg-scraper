@@ -112,6 +112,90 @@ test("buildWebsiteViewModel: handles missing files cleanly", () => {
   assert.ok(model.issues.includes("Timecard data file is missing."));
 });
 
+test("buildWebsiteViewModel: produces a unified timeline merging schedule and timecard", () => {
+  const schedule = {
+    extractedAt: "2026-03-28T21:00:00.000Z",
+    shifts: [
+      { date: "2026-03-27", day: "Fri", start: "9:00", end: "14:00", off: false, note: null, segments: [{ start: "9:00", end: "12:30" }, { start: "12:45", end: "14:00" }] },
+      { date: "2026-03-28", day: "Sat", start: null, end: null, off: true, note: null },
+      { date: "2026-03-29", day: "Sun", start: null, end: null, off: true, note: null },
+      { date: "2026-03-30", day: "Mon", start: "9:00", end: "14:00", off: false, note: null, segments: [{ start: "9:00", end: "12:30" }, { start: "12:45", end: "14:00" }] },
+      { date: "2026-03-31", day: "Tue", start: "9:00", end: "19:00", off: false, note: null },
+      { date: "2026-04-01", day: "Wed", start: null, end: null, off: false, note: "Easter Holiday" },
+    ],
+  };
+
+  const timecard = {
+    extractedAt: "2026-03-30T19:00:00.000Z",
+    period: "Last 2 Weeks",
+    entries: [
+      { date: "27/03", day: "Fri", clockIn1: "08:55", clockOut1: "14:02", clockIn2: null, clockOut2: null, dailyTotal: "5:07" },
+      { date: "30/03", day: "Mon", clockIn1: "08:59", clockOut1: "13:02", clockIn2: "13:32", clockOut2: "14:07", dailyTotal: "4:43" },
+    ],
+  };
+
+  const model = buildWebsiteViewModel({ schedule, timecard, now: "2026-03-30T12:00:00.000Z" });
+
+  // timelineDays should exist and be sorted by date ascending
+  assert.ok(Array.isArray(model.timelineDays));
+  assert.ok(model.timelineDays.length >= 6);
+
+  const dates = model.timelineDays.map((d) => d.date);
+  for (let i = 1; i < dates.length; i++) {
+    assert.ok(dates[i] >= dates[i - 1], `Expected ${dates[i]} >= ${dates[i - 1]}`);
+  }
+
+  // Today should be marked
+  const today = model.timelineDays.find((d) => d.isToday);
+  assert.ok(today);
+  assert.strictEqual(today.date, "2026-03-30");
+  assert.strictEqual(today.timeRange, "9:00 - 14:00");
+  assert.strictEqual(today.punches, "08:59 - 13:02, 13:32 - 14:07");
+  assert.strictEqual(today.total, "4:43");
+
+  // Past day with both schedule and timecard
+  const fri27 = model.timelineDays.find((d) => d.date === "2026-03-27");
+  assert.ok(fri27);
+  assert.ok(fri27.isPast);
+  assert.strictEqual(fri27.timeRange, "9:00 - 14:00");
+  assert.strictEqual(fri27.punches, "08:55 - 14:02");
+  assert.strictEqual(fri27.breakLabel, "Break 12:30 - 12:45");
+
+  // Off day
+  const sat28 = model.timelineDays.find((d) => d.date === "2026-03-28");
+  assert.ok(sat28);
+  assert.strictEqual(sat28.timeRange, "Off");
+
+  // Future day
+  const tue31 = model.timelineDays.find((d) => d.date === "2026-03-31");
+  assert.ok(tue31);
+  assert.ok(!tue31.isPast);
+  assert.ok(!tue31.isToday);
+
+  // Holiday note
+  const wed01 = model.timelineDays.find((d) => d.date === "2026-04-01");
+  assert.ok(wed01);
+  assert.strictEqual(wed01.note, "Easter Holiday");
+});
+
+test("buildWebsiteViewModel: timelineDays includes timecard-only days not in schedule", () => {
+  const model = buildWebsiteViewModel({
+    schedule: { extractedAt: "2026-03-30T10:00:00.000Z", shifts: [] },
+    timecard: {
+      extractedAt: "2026-03-30T10:00:00.000Z",
+      period: "Last 2 Weeks",
+      entries: [
+        { date: "25/03", day: "Wed", clockIn1: "09:00", clockOut1: "14:00", dailyTotal: "5:00" },
+      ],
+    },
+    now: "2026-03-30T12:00:00.000Z",
+  });
+
+  const wed25 = model.timelineDays.find((d) => d.date === "2026-03-25");
+  assert.ok(wed25, "Timecard-only days should appear in timeline");
+  assert.strictEqual(wed25.punches, "09:00 - 14:00");
+});
+
 test("buildWebsiteViewModel: sorts recent entries across month boundaries", () => {
   const model = buildWebsiteViewModel({
     schedule: null,

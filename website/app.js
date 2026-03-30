@@ -28,148 +28,112 @@ function escapeHtml(value) {
 }
 
 /**
+ * Renders a single timeline day card.
+ * @param {import("./view-model.js").TimelineDay} day
+ * @returns {string}
+ */
+function renderDay(day) {
+  const cls = day.isToday ? "day day-today" : day.isPast ? "day day-past" : "day day-future";
+
+  const timeRange = day.timeRange ? escapeHtml(day.timeRange) : null;
+  const isOff = timeRange === "Off";
+
+  /** @type {string[]} */
+  const details = [];
+
+  if (day.punches) {
+    details.push(`<span class="day-punches">${escapeHtml(day.punches)}</span>`);
+  }
+  if (day.breakLabel) {
+    details.push(`<span class="day-break">${escapeHtml(day.breakLabel)}</span>`);
+  }
+  if (day.note && day.note !== day.timeRange) {
+    details.push(`<span class="day-note">${escapeHtml(day.note)}</span>`);
+  }
+
+  return `
+    <article class="${cls}" ${day.isToday ? 'id="today"' : ""}>
+      <div class="day-left">
+        <strong class="day-date">${escapeHtml(day.dateLabel)}</strong>
+        ${timeRange && !isOff ? `<span class="day-schedule">${timeRange}</span>` : ""}
+        ${isOff ? `<span class="day-off">Off</span>` : ""}
+        ${details.length > 0 ? `<div class="day-details">${details.join("")}</div>` : ""}
+      </div>
+      ${day.total ? `<span class="day-total">${escapeHtml(day.total)}</span>` : ""}
+    </article>
+  `;
+}
+
+/**
+ * Renders the full timeline.
+ * @param {ReturnType<typeof buildWebsiteViewModel>} model
+ * @returns {string}
+ */
+function renderTimeline(model) {
+  if (model.timelineDays.length === 0) {
+    return `<p class="empty">No schedule or timecard data available.</p>`;
+  }
+
+  /** @type {string[]} */
+  const parts = [];
+  let insertedTodayMarker = false;
+
+  for (const day of model.timelineDays) {
+    if (day.isToday && !insertedTodayMarker) {
+      parts.push(`<div class="today-marker"><span>Today</span></div>`);
+      insertedTodayMarker = true;
+    }
+    parts.push(renderDay(day));
+  }
+
+  // If today wasn't in the data, insert marker between past and future
+  if (!insertedTodayMarker) {
+    const idx = model.timelineDays.findIndex((d) => d.date >= model.todayIso);
+    if (idx >= 0) {
+      parts.splice(idx, 0, `<div class="today-marker"><span>Today</span></div>`);
+    }
+  }
+
+  return parts.join("");
+}
+
+/**
+ * Renders issue warnings if any.
  * @param {string[]} issues
  * @returns {string}
  */
 function renderIssues(issues) {
   if (issues.length === 0) {
-    return `
-      <div class="issue issue-ok">
-        <span class="issue-label">Status</span>
-        <p>Loaded the latest files from <code>data/</code>.</p>
-      </div>
-    `;
+    return "";
   }
-
   return issues.map((issue) => `
     <div class="issue">
-      <span class="issue-label">Attention</span>
-      <p>${escapeHtml(issue)}</p>
+      <span class="issue-dot"></span>
+      <span>${escapeHtml(issue)}</span>
     </div>
   `).join("");
 }
 
 /**
- * @param {import("./view-model.js").buildWebsiteViewModel extends (...args: any[]) => infer T ? T : never} model
- * @returns {string}
- */
-function renderSummary(model) {
-  return `
-    <section class="hero">
-      <div class="hero-copy">
-        <p class="eyebrow">UKG Snapshot</p>
-        <h1>Current info from the <code>data/</code> folder.</h1>
-        <p class="lede">No live scraping here. This page only shows whatever was last written to the repo.</p>
-      </div>
-      <div class="hero-panel">
-        <p class="panel-label">Next shift</p>
-        <strong>${model.nextShift ? escapeHtml(model.nextShift.dateLabel) : "No upcoming shift"}</strong>
-        <span>${model.nextShift ? escapeHtml(model.nextShift.timeRange) : "Check the schedule files"}</span>
-        ${model.nextShift?.breakLabel ? `<em>${escapeHtml(model.nextShift.breakLabel)}</em>` : ""}
-      </div>
-    </section>
-
-    <section class="metrics">
-      <article class="metric">
-        <span class="metric-label">Upcoming shifts</span>
-        <strong>${model.scheduleSummary.upcomingCount}</strong>
-        <small class="${model.scheduleSummary.isStale ? "stale" : "fresh"}">
-          Schedule file: ${escapeHtml(model.scheduleSummary.extractedLabel)}
-        </small>
-      </article>
-      <article class="metric">
-        <span class="metric-label">Tracked days</span>
-        <strong>${model.timecardSummary.trackedDays}</strong>
-        <small>${escapeHtml(model.timecardSummary.period ?? "No timecard period")}</small>
-      </article>
-      <article class="metric">
-        <span class="metric-label">Total worked</span>
-        <strong>${escapeHtml(model.timecardSummary.totalHours)}</strong>
-        <small class="${model.timecardSummary.isStale ? "stale" : "fresh"}">
-          Timecard file: ${escapeHtml(model.timecardSummary.extractedLabel)}
-        </small>
-      </article>
-    </section>
-  `;
-}
-
-/**
+ * Renders the summary bar at the top.
  * @param {ReturnType<typeof buildWebsiteViewModel>} model
  * @returns {string}
  */
-function renderSchedule(model) {
-  if (model.upcomingShifts.length === 0) {
-    return `
-      <section class="panel">
-        <div class="section-heading">
-          <p class="eyebrow">Schedule</p>
-          <h2>No upcoming shifts in the current file.</h2>
-        </div>
-      </section>
-    `;
-  }
-
+function renderHeader(model) {
   return `
-    <section class="panel">
-      <div class="section-heading">
-        <p class="eyebrow">Schedule</p>
-        <h2>Upcoming shifts</h2>
+    <header class="header">
+      <div class="header-left">
+        <h1>Schedule</h1>
+        ${model.nextShift
+          ? `<p class="next-shift">Next: <strong>${escapeHtml(model.nextShift.dateLabel)}</strong> ${escapeHtml(model.nextShift.timeRange)}</p>`
+          : `<p class="next-shift">No upcoming shifts</p>`
+        }
       </div>
-      <div class="list">
-        ${model.upcomingShifts.map((shift) => `
-          <article class="list-row">
-            <div>
-              <strong>${escapeHtml(shift.dateLabel)}</strong>
-              <p>${escapeHtml(shift.timeRange)}</p>
-            </div>
-            <div class="row-meta">
-              ${shift.breakLabel ? `<span>${escapeHtml(shift.breakLabel)}</span>` : ""}
-              ${shift.note ? `<span>${escapeHtml(shift.note)}</span>` : ""}
-            </div>
-          </article>
-        `).join("")}
+      <div class="header-right">
+        <span class="stat">${escapeHtml(model.timecardSummary.totalHours)} <small>worked</small></span>
+        <span class="stat">${model.timecardSummary.trackedDays} <small>days</small></span>
       </div>
-    </section>
-  `;
-}
-
-/**
- * @param {ReturnType<typeof buildWebsiteViewModel>} model
- * @returns {string}
- */
-function renderTimecard(model) {
-  if (model.recentEntries.length === 0) {
-    return `
-      <section class="panel">
-        <div class="section-heading">
-          <p class="eyebrow">Timecard</p>
-          <h2>No recent entries in the current file.</h2>
-        </div>
-      </section>
-    `;
-  }
-
-  return `
-    <section class="panel">
-      <div class="section-heading">
-        <p class="eyebrow">Timecard</p>
-        <h2>Latest entries</h2>
-      </div>
-      <div class="list">
-        ${model.recentEntries.map((entry) => `
-          <article class="list-row">
-            <div>
-              <strong>${escapeHtml(entry.dateLabel)}</strong>
-              <p>${escapeHtml(entry.punches ?? "No punches recorded")}</p>
-            </div>
-            <div class="row-meta">
-              ${entry.total ? `<span>Total ${escapeHtml(entry.total)}</span>` : ""}
-              ${entry.payCode ? `<span>${escapeHtml(entry.payCode)}</span>` : ""}
-            </div>
-          </article>
-        `).join("")}
-      </div>
-    </section>
+    </header>
   `;
 }
 
@@ -192,21 +156,26 @@ async function main() {
     });
 
     root.innerHTML = `
-      ${renderSummary(model)}
-      <section class="issues">
-        ${renderIssues(model.issues)}
-      </section>
-      <div class="two-up">
-        ${renderSchedule(model)}
-        ${renderTimecard(model)}
+      ${renderHeader(model)}
+      ${renderIssues(model.issues)}
+      <div class="timeline">
+        ${renderTimeline(model)}
       </div>
     `;
+
+    root.classList.remove("app-loading");
+
+    // Scroll today into view
+    const todayEl = document.getElementById("today");
+    if (todayEl) {
+      todayEl.scrollIntoView({ block: "center" });
+    }
   } catch (error) {
     root.innerHTML = `
-      <section class="issue issue-fatal">
-        <span class="issue-label">Error</span>
-        <p>${escapeHtml(error instanceof Error ? error.message : String(error))}</p>
-      </section>
+      <div class="issue">
+        <span class="issue-dot issue-dot-error"></span>
+        <span>${escapeHtml(error instanceof Error ? error.message : String(error))}</span>
+      </div>
     `;
   }
 }

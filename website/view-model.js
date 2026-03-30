@@ -67,6 +67,21 @@
 
 /**
  * @typedef {{
+ *   date: string,
+ *   dateLabel: string,
+ *   isToday: boolean,
+ *   isPast: boolean,
+ *   timeRange: string | null,
+ *   breakLabel: string | null,
+ *   note: string | null,
+ *   punches: string | null,
+ *   total: string | null,
+ *   payCode: string | null,
+ * }} TimelineDay
+ */
+
+/**
+ * @typedef {{
  *   todayIso: string,
  *   nextShift: UpcomingShiftCard | null,
  *   scheduleSummary: {
@@ -85,6 +100,7 @@
  *   },
  *   upcomingShifts: UpcomingShiftCard[],
  *   recentEntries: RecentEntryCard[],
+ *   timelineDays: TimelineDay[],
  *   issues: string[],
  * }} WebsiteViewModel
  */
@@ -270,6 +286,56 @@ function buildWebsiteViewModel(input) {
     return sum + (minutes ?? 0);
   }, 0);
 
+  // --- Build unified timeline ---
+  /** @type {Map<string, TimelineDay>} */
+  const dayMap = new Map();
+
+  // Seed from schedule shifts
+  for (const shift of input.schedule?.shifts ?? []) {
+    dayMap.set(shift.date, {
+      date: shift.date,
+      dateLabel: formatIsoDate(shift.date, shift.day),
+      isToday: shift.date === todayIso,
+      isPast: shift.date < todayIso,
+      timeRange: formatShiftTimeRange(shift),
+      breakLabel: formatBreakLabel(shift.segments),
+      note: shift.note,
+      punches: null,
+      total: null,
+      payCode: null,
+    });
+  }
+
+  // Merge timecard entries
+  for (const entry of input.timecard?.entries ?? []) {
+    const isoDate = resolveDdmmIso(entry.date, referenceDate);
+    const existing = dayMap.get(isoDate);
+    const punches = formatPunches(entry);
+    const total = entry.dailyTotal ?? entry.shiftTotal ?? null;
+    const payCode = entry.payCode ?? null;
+
+    if (existing) {
+      existing.punches = punches;
+      existing.total = total;
+      existing.payCode = payCode;
+    } else {
+      dayMap.set(isoDate, {
+        date: isoDate,
+        dateLabel: formatIsoDate(isoDate, entry.day),
+        isToday: isoDate === todayIso,
+        isPast: isoDate < todayIso,
+        timeRange: null,
+        breakLabel: null,
+        note: null,
+        punches,
+        total,
+        payCode,
+      });
+    }
+  }
+
+  const timelineDays = [...dayMap.values()].sort((a, b) => a.date.localeCompare(b.date));
+
   return {
     todayIso,
     nextShift,
@@ -289,6 +355,7 @@ function buildWebsiteViewModel(input) {
     },
     upcomingShifts,
     recentEntries,
+    timelineDays,
     issues,
   };
 }
