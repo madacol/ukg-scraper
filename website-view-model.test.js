@@ -196,6 +196,36 @@ test("buildWebsiteViewModel: timelineDays includes timecard-only days not in sch
   assert.strictEqual(wed25.punches, "09:00 - 14:00");
 });
 
+test("buildWebsiteViewModel: timelineDays uses timecard schedule field for past days", () => {
+  const model = buildWebsiteViewModel({
+    schedule: { extractedAt: "2026-03-30T10:00:00.000Z", shifts: [] },
+    timecard: {
+      extractedAt: "2026-03-30T10:00:00.000Z",
+      period: "Last 2 Weeks",
+      entries: [
+        { date: "23/03", day: "Mon", schedule: "09:00 - 14:00", clockIn1: "08:55", clockOut1: "12:27", clockIn2: "13:07", clockOut2: "14:43", dailyTotal: "5:13" },
+        { date: "24/03", day: "Tue", schedule: "09:00 - 19:00", clockIn1: "09:00", clockOut1: "11:40", clockIn2: "12:54", clockOut2: "18:38", dailyTotal: "8:24" },
+        { date: "25/03", day: "Wed", schedule: null, clockIn1: null, clockOut1: null, dailyTotal: null },
+      ],
+    },
+    now: "2026-03-30T12:00:00.000Z",
+  });
+
+  const mon23 = model.timelineDays.find((d) => d.date === "2026-03-23");
+  assert.ok(mon23);
+  assert.strictEqual(mon23.timeRange, "09:00 - 14:00", "Should use timecard schedule field as timeRange");
+  assert.strictEqual(mon23.punches, "08:55 - 12:27, 13:07 - 14:43");
+
+  const tue24 = model.timelineDays.find((d) => d.date === "2026-03-24");
+  assert.ok(tue24);
+  assert.strictEqual(tue24.timeRange, "09:00 - 19:00");
+
+  // Null schedule should not set timeRange
+  const wed25 = model.timelineDays.find((d) => d.date === "2026-03-25");
+  assert.ok(wed25);
+  assert.strictEqual(wed25.timeRange, null);
+});
+
 test("buildWebsiteViewModel: sorts recent entries across month boundaries", () => {
   const model = buildWebsiteViewModel({
     schedule: null,

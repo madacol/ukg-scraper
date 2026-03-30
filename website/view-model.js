@@ -313,18 +313,22 @@ function buildWebsiteViewModel(input) {
     const punches = formatPunches(entry);
     const total = entry.dailyTotal ?? entry.shiftTotal ?? null;
     const payCode = entry.payCode ?? null;
+    const timecardSchedule = entry.schedule ?? null;
 
     if (existing) {
       existing.punches = punches;
       existing.total = total;
       existing.payCode = payCode;
+      if (!existing.timeRange && timecardSchedule) {
+        existing.timeRange = timecardSchedule;
+      }
     } else {
       dayMap.set(isoDate, {
         date: isoDate,
         dateLabel: formatIsoDate(isoDate, entry.day),
         isToday: isoDate === todayIso,
         isPast: isoDate < todayIso,
-        timeRange: null,
+        timeRange: timecardSchedule,
         breakLabel: null,
         note: null,
         punches,
