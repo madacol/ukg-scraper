@@ -377,7 +377,7 @@ test("buildWebsiteViewModel: weekGroups groups days Monday to Sunday with totals
   assert.ok(Array.isArray(model.weekGroups));
   assert.strictEqual(model.weekGroups.length, 3);
 
-  // First week: Mon 23 - Sun 29 (contains Fri 27, Sat 28, Sun 29)
+  // First week: Mon 23 - Sun 29 (Fri 27, Sat 28, Sun 29 — no earlier gaps to fill)
   const week1 = model.weekGroups[0];
   assert.ok(week1.weekLabel.includes("23"));
   assert.ok(week1.weekLabel.includes("29"));
@@ -385,15 +385,15 @@ test("buildWebsiteViewModel: weekGroups groups days Monday to Sunday with totals
   // Fri 27 has clocked total 4:58 = 298 min
   assert.strictEqual(week1.totalFormatted, "4:58");
 
-  // Second week: Mon 30 - Sun 5 (contains Mon 30, Tue 31, Wed 1)
+  // Second week: Mon 30 - Sun 5 (all 7 days filled: Mon 30, Tue 31, Wed 1, Thu 2, Fri 3, Sat 4, Sun 5)
   const week2 = model.weekGroups[1];
   assert.ok(week2.weekLabel.includes("30"));
   assert.ok(week2.weekLabel.includes("5"));
-  assert.strictEqual(week2.days.length, 3);
-  // Mon 30 clocked 5:00 + Tue 31 scheduled 5:00 = 10:00
+  assert.strictEqual(week2.days.length, 7);
+  // Mon 30 clocked 5:00 + Tue 31 scheduled 5:00 = 10:00 (gap days add 0)
   assert.strictEqual(week2.totalFormatted, "10:00");
 
-  // Third week: Mon 6 - Sun 12 (contains Mon 6 only)
+  // Third week: Mon 6 - Sun 12 (only Mon 6)
   const week3 = model.weekGroups[2];
   assert.strictEqual(week3.days.length, 1);
   // Mon 6 scheduled 10h
@@ -420,6 +420,69 @@ test("buildWebsiteViewModel: weekGroups week label spans month boundaries", () =
   // Mon 30 Mar - Sun 5 Apr
   assert.ok(model.weekGroups[0].weekLabel.includes("Mar"));
   assert.ok(model.weekGroups[0].weekLabel.includes("Apr"));
+});
+
+// ── Fill all days (including unscheduled free days) ──
+
+test("buildWebsiteViewModel: fills all gaps between earliest and latest day", () => {
+  const schedule = {
+    extractedAt: "2026-03-30T10:00:00.000Z",
+    shifts: [
+      { date: "2026-03-30", day: "Mon", start: "9:00", end: "14:00", off: false, note: null },
+      // Tue 31, Wed 1, Thu 2 are not scheduled at all
+      { date: "2026-04-03", day: "Fri", start: "14:00", end: "19:00", off: false, note: null },
+    ],
+  };
+
+  const model = buildWebsiteViewModel({ schedule, timecard: null, now: "2026-03-30T12:00:00.000Z" });
+
+  const dates = model.timelineDays.map((d) => d.date);
+  // Should include every day from Mar 30 to Apr 3 (5 days)
+  assert.ok(dates.includes("2026-03-30"));
+  assert.ok(dates.includes("2026-03-31"), "Tue 31 should be filled in");
+  assert.ok(dates.includes("2026-04-01"), "Wed 1 should be filled in");
+  assert.ok(dates.includes("2026-04-02"), "Thu 2 should be filled in");
+  assert.ok(dates.includes("2026-04-03"));
+  assert.strictEqual(dates.length, 5);
+
+  // Gap-filled days should have no schedule and shiftType null
+  const tue31 = model.timelineDays.find((d) => d.date === "2026-03-31");
+  assert.ok(tue31);
+  assert.strictEqual(tue31.timeRange, null);
+  assert.strictEqual(tue31.shiftType, null);
+  assert.strictEqual(tue31.dateLabel, "Tue 31 Mar");
+});
+
+test("buildWebsiteViewModel: fills past gaps between timecard and schedule", () => {
+  const schedule = {
+    extractedAt: "2026-03-30T10:00:00.000Z",
+    shifts: [
+      { date: "2026-03-30", day: "Mon", start: "9:00", end: "14:00", off: false, note: null },
+      { date: "2026-04-06", day: "Mon", start: "9:00", end: "14:00", off: false, note: null },
+    ],
+  };
+
+  const timecard = {
+    extractedAt: "2026-03-30T10:00:00.000Z",
+    period: "Last 2 Weeks",
+    entries: [
+      { date: "25/03", day: "Wed", clockIn1: "09:00", clockOut1: "14:00", dailyTotal: "5:00" },
+    ],
+  };
+
+  const model = buildWebsiteViewModel({ schedule, timecard, now: "2026-03-30T12:00:00.000Z" });
+
+  const dates = model.timelineDays.map((d) => d.date);
+  // Should span from Mar 25 (earliest timecard) to Apr 6 (latest schedule)
+  // That's 13 days: Mar 25–31 (7) + Apr 1–6 (6)
+  assert.strictEqual(dates.length, 13);
+  assert.strictEqual(dates[0], "2026-03-25");
+  assert.strictEqual(dates[dates.length - 1], "2026-04-06");
+
+  // Spot-check a gap day
+  const thu26 = model.timelineDays.find((d) => d.date === "2026-03-26");
+  assert.ok(thu26, "Thu 26 should be filled in");
+  assert.strictEqual(thu26.dateLabel, "Thu 26 Mar");
 });
 
 test("buildWebsiteViewModel: sorts recent entries across month boundaries", () => {

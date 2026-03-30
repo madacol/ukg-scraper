@@ -517,13 +517,13 @@ function buildWebsiteViewModel(input) {
     }
   }
 
-  const earliestTimecardIso = (input.timecard?.entries ?? []).reduce((earliest, entry) => {
-    const isoDate = resolveDdmmIso(entry.date, referenceDate);
-    return !earliest || isoDate < earliest ? isoDate : earliest;
-  }, /** @type {string | null} */ (null));
+  // Fill every gap between the earliest and latest dates so free days are visible
+  if (dayMap.size > 0) {
+    const allDates = [...dayMap.keys()].sort();
+    const earliest = allDates[0];
+    const latest = allDates[allDates.length - 1];
 
-  if (earliestTimecardIso) {
-    for (let isoDate = earliestTimecardIso; isoDate <= todayIso; isoDate = addIsoDays(isoDate, 1)) {
+    for (let isoDate = earliest; isoDate <= latest; isoDate = addIsoDays(isoDate, 1)) {
       if (dayMap.has(isoDate)) {
         continue;
       }
