@@ -1,17 +1,24 @@
 :root {
   --bg: #0f0f0f;
-  --ink: #e4e4e4;
-  --muted: #888;
-  --subtle: #555;
-  --line: #252525;
+  --ink: #ececec;
+  --muted: #9ca3af;
+  --subtle: #6b7280;
+  --line: #282828;
   --accent: #60a5fa;
   --accent-bg: rgba(96, 165, 250, 0.1);
   --today-ring: #60a5fa;
-  --off-color: #555;
+  --off-color: #6b7280;
   --warn: #fbbf24;
   --card-bg: #181818;
   --shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   --radius: 12px;
+
+  /* Shift type colors */
+  --shift-morning: #f59e0b;
+  --shift-evening: #8b5cf6;
+  --shift-full: #ef4444;
+  --shift-off: #374151;
+  --shift-non-standard: #14b8a6;
 }
 
 * {
@@ -124,7 +131,43 @@ main {
 .timeline {
   display: flex;
   flex-direction: column;
+  gap: 0;
+}
+
+/* ── Week group ── */
+
+.week-group {
+  display: flex;
+  flex-direction: column;
   gap: 6px;
+  margin-bottom: 0.25rem;
+}
+
+.week-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.6rem 0.5rem 0.25rem;
+  margin-top: 0.5rem;
+}
+
+.week-group:first-child .week-header {
+  margin-top: 0;
+}
+
+.week-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--subtle);
+}
+
+.week-total {
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
 }
 
 /* ── Today marker ── */
@@ -164,6 +207,7 @@ main {
   border-radius: var(--radius);
   background: var(--card-bg);
   border: 1px solid var(--line);
+  border-left: 4px solid var(--line);
   transition: box-shadow 0.15s ease;
 }
 
@@ -174,6 +218,7 @@ main {
 .day-today {
   border-color: var(--today-ring);
   border-width: 2px;
+  border-left-width: 4px;
   background: var(--accent-bg);
 }
 
@@ -184,6 +229,75 @@ main {
 .day-past:hover {
   opacity: 1;
 }
+
+/* ── Shift type left border colors ── */
+
+.day-shift-morning {
+  border-left-color: var(--shift-morning);
+}
+
+.day-shift-evening {
+  border-left-color: var(--shift-evening);
+}
+
+.day-shift-full {
+  border-left-color: var(--shift-full);
+}
+
+.day-shift-off {
+  border-left-color: var(--shift-off);
+}
+
+/* Non-standard shifts get a dashed left border */
+.day-non-standard {
+  border-left-style: dashed;
+  border-left-width: 4px;
+}
+
+/* Shift type badge */
+.shift-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  vertical-align: middle;
+  margin-left: 0.4rem;
+}
+
+.shift-badge-morning {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--shift-morning);
+}
+
+.shift-badge-evening {
+  background: rgba(139, 92, 246, 0.15);
+  color: var(--shift-evening);
+}
+
+.shift-badge-full {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--shift-full);
+}
+
+.day-today .day-shift-morning,
+.day-today.day-shift-morning {
+  border-left-color: var(--shift-morning);
+}
+
+.day-today .day-shift-evening,
+.day-today.day-shift-evening {
+  border-left-color: var(--shift-evening);
+}
+
+.day-today .day-shift-full,
+.day-today.day-shift-full {
+  border-left-color: var(--shift-full);
+}
+
+/* ── Day inner layout ── */
 
 .day-left {
   display: flex;
@@ -248,6 +362,44 @@ main {
 
 .day-today .day-total {
   color: var(--accent);
+}
+
+/* ── Legend ── */
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  margin-bottom: 0.25rem;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+
+.legend-bar {
+  width: 14px;
+  height: 4px;
+  border-radius: 2px;
+}
+
+.legend-bar-morning { background: var(--shift-morning); }
+.legend-bar-evening { background: var(--shift-evening); }
+.legend-bar-full { background: var(--shift-full); }
+.legend-bar-off { background: var(--shift-off); }
+
+.legend-bar-dashed {
+  width: 14px;
+  height: 0;
+  border-top: 2px dashed var(--shift-non-standard);
 }
 
 /* ── Empty state ── */

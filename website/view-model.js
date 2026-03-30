@@ -66,6 +66,10 @@
  */
 
 /**
+ * @typedef {"morning" | "evening" | "full" | "off"} ShiftType
+ */
+
+/**
  * @typedef {{
  *   date: string,
  *   dateLabel: string,
@@ -77,7 +81,17 @@
  *   punches: string | null,
  *   total: string | null,
  *   payCode: string | null,
+ *   shiftType: ShiftType | null,
+ *   isNonStandard: boolean,
  * }} TimelineDay
+ */
+
+/**
+ * @typedef {{
+ *   weekLabel: string,
+ *   days: TimelineDay[],
+ *   totalFormatted: string,
+ * }} WeekGroup
  */
 
 /**
@@ -101,6 +115,7 @@
  *   upcomingShifts: UpcomingShiftCard[],
  *   recentEntries: RecentEntryCard[],
  *   timelineDays: TimelineDay[],
+ *   weekGroups: WeekGroup[],
  *   issues: string[],
  * }} WebsiteViewModel
  */
@@ -115,6 +130,8 @@
 
 /** @type {readonly string[]} */
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** @type {readonly string[]} */
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 /**
  * @param {string | null | undefined} value
@@ -152,6 +169,25 @@ function formatIsoDate(isoDate, day) {
   const month = MONTHS[parseInt(isoDate.slice(5, 7), 10) - 1];
   const date = parseInt(isoDate.slice(8, 10), 10);
   return `${day} ${date} ${month}`;
+}
+
+/**
+ * @param {string} isoDate
+ * @returns {string}
+ */
+function getIsoDayName(isoDate) {
+  return DAYS[new Date(`${isoDate}T00:00:00.000Z`).getUTCDay()];
+}
+
+/**
+ * @param {string} isoDate
+ * @param {number} days
+ * @returns {string}
+ */
+function addIsoDays(isoDate, days) {
+  const date = new Date(`${isoDate}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
 /**
@@ -236,6 +272,142 @@ function summarizeFreshness(extractedAt, todayIso) {
 }
 
 /**
+ * Parses a time string like "9:00" or "14:30" into minutes since midnight.
+ * @param {string} time
+ * @returns {number}
+ */
+function parseTimeToMinutes(time) {
+  const match = time.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return 0;
+  return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+}
+
+/**
+ * Classifies a shift by its time range into a type and standard/non-standard flag.
+ *
+ * Standard durations: morning/evening ≈ 5h (300 min), full day ≈ 10h (600 min).
+ * Non-standard means the actual duration deviates by more than 30 minutes.
+ *
+ * @param {string | null} timeRange - e.g. "9:00 - 14:00", "Off", "Easter Holiday", or null
+ * @param {boolean} off - whether the day is explicitly marked off
+ * @returns {{ shiftType: ShiftType | null, isNonStandard: boolean }}
+ */
+function classifyShift(timeRange, off) {
+  if (off) return { shiftType: "off", isNonStandard: false };
+  if (!timeRange || timeRange === "Off") return { shiftType: null, isNonStandard: false };
+
+  const match = timeRange.match(/^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$/);
+  if (!match) return { shiftType: null, isNonStandard: false };
+
+  const startMin = parseTimeToMinutes(match[1]);
+  const endMin = parseTimeToMinutes(match[2]);
+  const duration = endMin - startMin;
+
+  /** @type {ShiftType} */
+  let shiftType;
+  let standardDuration;
+
+  if (startMin < 720 && endMin > 960) {
+    // Starts before noon, ends after 16:00 → full day
+    shiftType = "full";
+    standardDuration = 600;
+  } else if (startMin < 720) {
+    shiftType = "morning";
+    standardDuration = 300;
+  } else {
+    shiftType = "evening";
+    standardDuration = 300;
+  }
+
+  const isNonStandard = Math.abs(duration - standardDuration) > 30;
+  return { shiftType, isNonStandard };
+}
+
+/**
+ * Computes the number of minutes for a day, using actual total if available,
+ * otherwise falling back to scheduled time range duration.
+ *
+ * @param {{ total: string | null, timeRange: string | null }} day
+ * @returns {number}
+ */
+function computeDayMinutes(day) {
+  if (day.total) {
+    return parseDuration(day.total) ?? 0;
+  }
+  if (!day.timeRange) return 0;
+
+  const match = day.timeRange.match(/^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$/);
+  if (!match) return 0;
+
+  return parseTimeToMinutes(match[2]) - parseTimeToMinutes(match[1]);
+}
+
+/**
+ * Returns the ISO date of the Monday for the week containing the given date.
+ * Weeks run Monday to Sunday.
+ * @param {string} isoDate
+ * @returns {string}
+ */
+function getWeekMonday(isoDate) {
+  const date = new Date(`${isoDate}T00:00:00.000Z`);
+  const dayOfWeek = date.getUTCDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+  const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  date.setUTCDate(date.getUTCDate() - daysToSubtract);
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * Formats a week label like "23 Mar – 29 Mar" or "30 Mar – 5 Apr".
+ * @param {string} mondayIso
+ * @param {string} sundayIso
+ * @returns {string}
+ */
+function formatWeekLabel(mondayIso, sundayIso) {
+  const monDay = parseInt(mondayIso.slice(8, 10), 10);
+  const monMonth = MONTHS[parseInt(mondayIso.slice(5, 7), 10) - 1];
+  const sunDay = parseInt(sundayIso.slice(8, 10), 10);
+  const sunMonth = MONTHS[parseInt(sundayIso.slice(5, 7), 10) - 1];
+
+  if (monMonth === sunMonth) {
+    return `${monDay} – ${sunDay} ${sunMonth}`;
+  }
+  return `${monDay} ${monMonth} – ${sunDay} ${sunMonth}`;
+}
+
+/**
+ * Groups timeline days into weeks (Monday–Sunday) and computes weekly totals.
+ * @param {TimelineDay[]} timelineDays - sorted by date ascending
+ * @returns {WeekGroup[]}
+ */
+function buildWeekGroups(timelineDays) {
+  if (timelineDays.length === 0) return [];
+
+  /** @type {{ monday: string, days: TimelineDay[] }[]} */
+  const groups = [];
+  /** @type {{ monday: string, days: TimelineDay[] } | null} */
+  let current = null;
+
+  for (const day of timelineDays) {
+    const monday = getWeekMonday(day.date);
+    if (!current || current.monday !== monday) {
+      current = { monday, days: [] };
+      groups.push(current);
+    }
+    current.days.push(day);
+  }
+
+  return groups.map((g) => {
+    const sunday = addIsoDays(g.monday, 6);
+    const totalMinutes = g.days.reduce((sum, d) => sum + computeDayMinutes(d), 0);
+    return {
+      weekLabel: formatWeekLabel(g.monday, sunday),
+      days: g.days,
+      totalFormatted: totalMinutes > 0 ? formatDuration(totalMinutes) : "",
+    };
+  });
+}
+
+/**
  * @param {BuildWebsiteViewModelInput} input
  * @returns {WebsiteViewModel}
  */
@@ -292,17 +464,21 @@ function buildWebsiteViewModel(input) {
 
   // Seed from schedule shifts
   for (const shift of input.schedule?.shifts ?? []) {
+    const timeRange = formatShiftTimeRange(shift);
+    const { shiftType, isNonStandard } = classifyShift(timeRange, shift.off);
     dayMap.set(shift.date, {
       date: shift.date,
       dateLabel: formatIsoDate(shift.date, shift.day),
       isToday: shift.date === todayIso,
       isPast: shift.date < todayIso,
-      timeRange: formatShiftTimeRange(shift),
+      timeRange,
       breakLabel: formatBreakLabel(shift.segments),
       note: shift.note,
       punches: null,
       total: null,
       payCode: null,
+      shiftType,
+      isNonStandard,
     });
   }
 
@@ -323,6 +499,7 @@ function buildWebsiteViewModel(input) {
         existing.timeRange = timecardSchedule;
       }
     } else {
+      const { shiftType, isNonStandard } = classifyShift(timecardSchedule, false);
       dayMap.set(isoDate, {
         date: isoDate,
         dateLabel: formatIsoDate(isoDate, entry.day),
@@ -334,11 +511,43 @@ function buildWebsiteViewModel(input) {
         punches,
         total,
         payCode,
+        shiftType,
+        isNonStandard,
+      });
+    }
+  }
+
+  const earliestTimecardIso = (input.timecard?.entries ?? []).reduce((earliest, entry) => {
+    const isoDate = resolveDdmmIso(entry.date, referenceDate);
+    return !earliest || isoDate < earliest ? isoDate : earliest;
+  }, /** @type {string | null} */ (null));
+
+  if (earliestTimecardIso) {
+    for (let isoDate = earliestTimecardIso; isoDate <= todayIso; isoDate = addIsoDays(isoDate, 1)) {
+      if (dayMap.has(isoDate)) {
+        continue;
+      }
+
+      const day = getIsoDayName(isoDate);
+      dayMap.set(isoDate, {
+        date: isoDate,
+        dateLabel: formatIsoDate(isoDate, day),
+        isToday: isoDate === todayIso,
+        isPast: isoDate < todayIso,
+        timeRange: null,
+        breakLabel: null,
+        note: null,
+        punches: null,
+        total: null,
+        payCode: null,
+        shiftType: null,
+        isNonStandard: false,
       });
     }
   }
 
   const timelineDays = [...dayMap.values()].sort((a, b) => a.date.localeCompare(b.date));
+  const weekGroups = buildWeekGroups(timelineDays);
 
   return {
     todayIso,
@@ -360,8 +569,9 @@ function buildWebsiteViewModel(input) {
     upcomingShifts,
     recentEntries,
     timelineDays,
+    weekGroups,
     issues,
   };
 }
 
-export { buildWebsiteViewModel };
+export { buildWebsiteViewModel, classifyShift, computeDayMinutes };

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { buildWebsiteViewModel } from "./website/view-model.js";
+import { buildWebsiteViewModel, classifyShift, computeDayMinutes } from "./website/view-model.js";
 
 test("buildWebsiteViewModel: summarizes latest schedule and timecard data", () => {
   const schedule = {
@@ -224,6 +224,202 @@ test("buildWebsiteViewModel: timelineDays uses timecard schedule field for past 
   const wed25 = model.timelineDays.find((d) => d.date === "2026-03-25");
   assert.ok(wed25);
   assert.strictEqual(wed25.timeRange, null);
+});
+
+test("buildWebsiteViewModel: backfills missing past days between earliest timecard day and today", () => {
+  const model = buildWebsiteViewModel({
+    schedule: { extractedAt: "2026-03-30T10:00:00.000Z", shifts: [] },
+    timecard: {
+      extractedAt: "2026-03-30T10:00:00.000Z",
+      period: "Last 30 Days",
+      entries: [
+        { date: "28/03", day: "Sat", dailyTotal: "4:00" },
+        { date: "30/03", day: "Mon", dailyTotal: "5:00" },
+      ],
+    },
+    now: "2026-03-30T12:00:00.000Z",
+  });
+
+  const sun29 = model.timelineDays.find((d) => d.date === "2026-03-29");
+  assert.ok(sun29);
+  assert.strictEqual(sun29.dateLabel, "Sun 29 Mar");
+  assert.strictEqual(sun29.punches, null);
+  assert.strictEqual(sun29.total, null);
+});
+
+// ── classifyShift ──
+
+test("classifyShift: morning shift (9:00 - 14:00)", () => {
+  assert.deepStrictEqual(classifyShift("9:00 - 14:00", false), { shiftType: "morning", isNonStandard: false });
+});
+
+test("classifyShift: evening shift (14:00 - 19:00)", () => {
+  assert.deepStrictEqual(classifyShift("14:00 - 19:00", false), { shiftType: "evening", isNonStandard: false });
+});
+
+test("classifyShift: full day shift (9:00 - 19:00)", () => {
+  assert.deepStrictEqual(classifyShift("9:00 - 19:00", false), { shiftType: "full", isNonStandard: false });
+});
+
+test("classifyShift: non-standard morning shift (9:00 - 15:30 = 6.5h)", () => {
+  assert.deepStrictEqual(classifyShift("9:00 - 15:30", false), { shiftType: "morning", isNonStandard: true });
+});
+
+test("classifyShift: non-standard evening shift (14:00 - 20:00 = 6h)", () => {
+  assert.deepStrictEqual(classifyShift("14:00 - 20:00", false), { shiftType: "evening", isNonStandard: true });
+});
+
+test("classifyShift: non-standard full day shift (9:00 - 20:00 = 11h)", () => {
+  assert.deepStrictEqual(classifyShift("9:00 - 20:00", false), { shiftType: "full", isNonStandard: true });
+});
+
+test("classifyShift: off day", () => {
+  assert.deepStrictEqual(classifyShift("Off", true), { shiftType: "off", isNonStandard: false });
+});
+
+test("classifyShift: off day with null timeRange", () => {
+  assert.deepStrictEqual(classifyShift(null, true), { shiftType: "off", isNonStandard: false });
+});
+
+test("classifyShift: null timeRange, not off", () => {
+  assert.deepStrictEqual(classifyShift(null, false), { shiftType: null, isNonStandard: false });
+});
+
+test("classifyShift: handles leading zeros (09:00 - 14:00)", () => {
+  assert.deepStrictEqual(classifyShift("09:00 - 14:00", false), { shiftType: "morning", isNonStandard: false });
+});
+
+test("classifyShift: note string returns null type", () => {
+  assert.deepStrictEqual(classifyShift("Easter Holiday", false), { shiftType: null, isNonStandard: false });
+});
+
+// ── computeDayMinutes ──
+
+test("computeDayMinutes: uses total when available", () => {
+  assert.strictEqual(computeDayMinutes({ total: "5:00", timeRange: "9:00 - 14:00" }), 300);
+});
+
+test("computeDayMinutes: falls back to timeRange when no total", () => {
+  assert.strictEqual(computeDayMinutes({ total: null, timeRange: "9:00 - 14:00" }), 300);
+});
+
+test("computeDayMinutes: returns 0 for Off", () => {
+  assert.strictEqual(computeDayMinutes({ total: null, timeRange: "Off" }), 0);
+});
+
+test("computeDayMinutes: returns 0 for null timeRange", () => {
+  assert.strictEqual(computeDayMinutes({ total: null, timeRange: null }), 0);
+});
+
+test("computeDayMinutes: handles leading zeros in timeRange", () => {
+  assert.strictEqual(computeDayMinutes({ total: null, timeRange: "09:00 - 19:00" }), 600);
+});
+
+// ── shiftType in timelineDays ──
+
+test("buildWebsiteViewModel: timelineDays include shiftType classification", () => {
+  const schedule = {
+    extractedAt: "2026-03-30T10:00:00.000Z",
+    shifts: [
+      { date: "2026-03-30", day: "Mon", start: "9:00", end: "14:00", off: false, note: null },
+      { date: "2026-03-31", day: "Tue", start: "14:00", end: "19:00", off: false, note: null },
+      { date: "2026-04-01", day: "Wed", start: "9:00", end: "19:00", off: false, note: null },
+      { date: "2026-04-02", day: "Thu", start: null, end: null, off: true, note: null },
+    ],
+  };
+
+  const model = buildWebsiteViewModel({ schedule, timecard: null, now: "2026-03-30T12:00:00.000Z" });
+
+  const mon = model.timelineDays.find((d) => d.date === "2026-03-30");
+  assert.strictEqual(mon?.shiftType, "morning");
+  assert.strictEqual(mon?.isNonStandard, false);
+
+  const tue = model.timelineDays.find((d) => d.date === "2026-03-31");
+  assert.strictEqual(tue?.shiftType, "evening");
+
+  const wed = model.timelineDays.find((d) => d.date === "2026-04-01");
+  assert.strictEqual(wed?.shiftType, "full");
+
+  const thu = model.timelineDays.find((d) => d.date === "2026-04-02");
+  assert.strictEqual(thu?.shiftType, "off");
+});
+
+// ── weekGroups ──
+
+test("buildWebsiteViewModel: weekGroups groups days Monday to Sunday with totals", () => {
+  const schedule = {
+    extractedAt: "2026-03-30T10:00:00.000Z",
+    shifts: [
+      // Week of Mon 23 Mar - Sun 29 Mar
+      { date: "2026-03-27", day: "Fri", start: "9:00", end: "14:00", off: false, note: null },
+      { date: "2026-03-28", day: "Sat", start: null, end: null, off: true, note: null },
+      { date: "2026-03-29", day: "Sun", start: null, end: null, off: true, note: null },
+      // Week of Mon 30 Mar - Sun 5 Apr
+      { date: "2026-03-30", day: "Mon", start: "9:00", end: "14:00", off: false, note: null },
+      { date: "2026-03-31", day: "Tue", start: "14:00", end: "19:00", off: false, note: null },
+      { date: "2026-04-01", day: "Wed", start: null, end: null, off: true, note: null },
+      // Week of Mon 6 Apr - Sun 12 Apr
+      { date: "2026-04-06", day: "Mon", start: "9:00", end: "19:00", off: false, note: null },
+    ],
+  };
+
+  const timecard = {
+    extractedAt: "2026-03-30T10:00:00.000Z",
+    period: "Last 2 Weeks",
+    entries: [
+      { date: "27/03", day: "Fri", clockIn1: "09:00", clockOut1: "13:58", dailyTotal: "4:58" },
+      { date: "30/03", day: "Mon", clockIn1: "09:00", clockOut1: "14:00", dailyTotal: "5:00" },
+    ],
+  };
+
+  const model = buildWebsiteViewModel({ schedule, timecard, now: "2026-03-30T12:00:00.000Z" });
+
+  assert.ok(Array.isArray(model.weekGroups));
+  assert.strictEqual(model.weekGroups.length, 3);
+
+  // First week: Mon 23 - Sun 29 (contains Fri 27, Sat 28, Sun 29)
+  const week1 = model.weekGroups[0];
+  assert.ok(week1.weekLabel.includes("23"));
+  assert.ok(week1.weekLabel.includes("29"));
+  assert.strictEqual(week1.days.length, 3);
+  // Fri 27 has clocked total 4:58 = 298 min
+  assert.strictEqual(week1.totalFormatted, "4:58");
+
+  // Second week: Mon 30 - Sun 5 (contains Mon 30, Tue 31, Wed 1)
+  const week2 = model.weekGroups[1];
+  assert.ok(week2.weekLabel.includes("30"));
+  assert.ok(week2.weekLabel.includes("5"));
+  assert.strictEqual(week2.days.length, 3);
+  // Mon 30 clocked 5:00 + Tue 31 scheduled 5:00 = 10:00
+  assert.strictEqual(week2.totalFormatted, "10:00");
+
+  // Third week: Mon 6 - Sun 12 (contains Mon 6 only)
+  const week3 = model.weekGroups[2];
+  assert.strictEqual(week3.days.length, 1);
+  // Mon 6 scheduled 10h
+  assert.strictEqual(week3.totalFormatted, "10:00");
+});
+
+test("buildWebsiteViewModel: weekGroups handles empty data", () => {
+  const model = buildWebsiteViewModel({ schedule: null, timecard: null, now: "2026-03-30T12:00:00.000Z" });
+  assert.deepStrictEqual(model.weekGroups, []);
+});
+
+test("buildWebsiteViewModel: weekGroups week label spans month boundaries", () => {
+  const schedule = {
+    extractedAt: "2026-03-30T10:00:00.000Z",
+    shifts: [
+      { date: "2026-03-30", day: "Mon", start: "9:00", end: "14:00", off: false, note: null },
+      { date: "2026-04-01", day: "Wed", start: "14:00", end: "19:00", off: false, note: null },
+    ],
+  };
+
+  const model = buildWebsiteViewModel({ schedule, timecard: null, now: "2026-03-30T12:00:00.000Z" });
+
+  assert.strictEqual(model.weekGroups.length, 1);
+  // Mon 30 Mar - Sun 5 Apr
+  assert.ok(model.weekGroups[0].weekLabel.includes("Mar"));
+  assert.ok(model.weekGroups[0].weekLabel.includes("Apr"));
 });
 
 test("buildWebsiteViewModel: sorts recent entries across month boundaries", () => {
