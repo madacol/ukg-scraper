@@ -1,6 +1,0 @@
-{
-  "subdomain": "ukg",
-  "static": {
-    "root": "./website"
-  }
-}
