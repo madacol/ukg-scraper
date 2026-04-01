@@ -24,6 +24,7 @@
 /**
  * @typedef {{
  *   date: string,
+ *   isoDate?: string,
  *   day: string,
  *   schedule?: string | null,
  *   absence?: string | null,
@@ -207,6 +208,15 @@ function resolveDdmmIso(ddmm, referenceDate) {
 }
 
 /**
+ * @param {TimecardEntry & { isoDate?: string }} entry
+ * @param {Date} referenceDate
+ * @returns {string}
+ */
+function getTimecardIsoDate(entry, referenceDate) {
+  return entry.isoDate ?? resolveDdmmIso(entry.date, referenceDate);
+}
+
+/**
  * @param {ScheduleShift} shift
  * @returns {string}
  */
@@ -325,15 +335,17 @@ function classifyShift(timeRange, off) {
 
 /**
  * Computes the number of minutes for a day, using actual total if available,
- * otherwise falling back to scheduled time range duration.
+ * otherwise falling back to scheduled time range duration only for today/future
+ * days. Past days without a timecard total contribute 0.
  *
- * @param {{ total: string | null, timeRange: string | null }} day
+ * @param {{ total: string | null, timeRange: string | null, isPast?: boolean }} day
  * @returns {number}
  */
 function computeDayMinutes(day) {
   if (day.total) {
     return parseDuration(day.total) ?? 0;
   }
+  if (day.isPast) return 0;
   if (!day.timeRange) return 0;
 
   const match = day.timeRange.match(/^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$/);
@@ -445,9 +457,9 @@ function buildWebsiteViewModel(input) {
   const nextShift = upcomingShifts.find((shift) => shift.timeRange !== "Off" && shift.timeRange !== "No details") ?? null;
 
   const recentEntries = [...(input.timecard?.entries ?? [])]
-    .sort((left, right) => resolveDdmmIso(right.date, referenceDate).localeCompare(resolveDdmmIso(left.date, referenceDate)))
+    .sort((left, right) => getTimecardIsoDate(right, referenceDate).localeCompare(getTimecardIsoDate(left, referenceDate)))
     .map((entry) => ({
-      dateLabel: formatIsoDate(resolveDdmmIso(entry.date, referenceDate), entry.day),
+      dateLabel: formatIsoDate(getTimecardIsoDate(entry, referenceDate), entry.day),
       punches: formatPunches(entry),
       total: entry.dailyTotal ?? entry.shiftTotal ?? null,
       payCode: entry.payCode ?? null,
@@ -484,7 +496,7 @@ function buildWebsiteViewModel(input) {
 
   // Merge timecard entries
   for (const entry of input.timecard?.entries ?? []) {
-    const isoDate = resolveDdmmIso(entry.date, referenceDate);
+    const isoDate = getTimecardIsoDate(entry, referenceDate);
     const existing = dayMap.get(isoDate);
     const punches = formatPunches(entry);
     const total = entry.dailyTotal ?? entry.shiftTotal ?? null;

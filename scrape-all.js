@@ -169,8 +169,15 @@ async function extractTimecardEntries(page) {
   return page.evaluate(() => {
     /** @type {TimecardEntry[]} */
     const results = [];
+    const rowIndexes = Array.from(document.querySelectorAll("[id$='_date']"))
+      .map((element) => {
+        const match = element.id.match(/^(\d+)_date$/);
+        return match ? parseInt(match[1], 10) : null;
+      })
+      .filter((value) => value !== null)
+      .sort((left, right) => left - right);
 
-    for (let i = 0; i < 7; i++) {
+    for (const i of rowIndexes) {
       const dateEl = document.getElementById(`${i}_date`);
       if (!dateEl) continue;
 

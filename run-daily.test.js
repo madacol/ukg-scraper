@@ -267,7 +267,7 @@ test("detectTimecardDiscrepancy: only clock-in mismatch", () => {
   assert.ok(!result[0].includes("Clock Out"));
 });
 
-test("detectTimecardDiscrepancy: compares clock pairs against segments", () => {
+test("detectTimecardDiscrepancy: ignores break boundaries when first in and final out match shift", () => {
   const schedule = { shifts: [{
     date: "2026-02-21", day: "Sat", start: "9:00", end: "14:05", off: false,
     segments: [{ start: "9:00", end: "13:00" }, { start: "13:25", end: "14:05" }],
@@ -281,7 +281,20 @@ test("detectTimecardDiscrepancy: compares clock pairs against segments", () => {
   assert.strictEqual(detectTimecardDiscrepancy(schedule, timecard, "2026-02-21"), null);
 });
 
-test("detectTimecardDiscrepancy: second pair mismatch with segments", () => {
+test("detectTimecardDiscrepancy: ignores break gap if first in and final out still match", () => {
+  const schedule = { shifts: [{
+    date: "2026-02-21", day: "Sat", start: "9:00", end: "14:05", off: false,
+    segments: [{ start: "9:00", end: "13:00" }, { start: "13:25", end: "14:05" }],
+  }] };
+  const timecard = { entries: [{
+    date: "21/02", day: "Sat",
+    clockIn1: "9:00", clockOut1: "12:00",
+    clockIn2: "14:00", clockOut2: "14:05",
+  }] };
+  assert.strictEqual(detectTimecardDiscrepancy(schedule, timecard, "2026-02-21"), null);
+});
+
+test("detectTimecardDiscrepancy: mismatched final clock-out is still reported", () => {
   const schedule = { shifts: [{
     date: "2026-02-21", day: "Sat", start: "9:00", end: "14:05", off: false,
     segments: [{ start: "9:00", end: "13:00" }, { start: "13:25", end: "14:05" }],
@@ -293,8 +306,8 @@ test("detectTimecardDiscrepancy: second pair mismatch with segments", () => {
   }] };
   const result = detectTimecardDiscrepancy(schedule, timecard, "2026-02-21");
   assert.ok(result);
-  assert.ok(result[0].includes("Clock In2"));
-  assert.ok(result[0].includes("15:30"));
+  assert.ok(result[0].includes("Clock Out"));
+  assert.ok(result[0].includes("17:00"));
 });
 
 // --- detectTimecardChanges ---

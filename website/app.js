@@ -1,5 +1,8 @@
 import { buildWebsiteViewModel } from "./view-model.js";
 
+const PAST_WINDOW_DAYS = 30;
+const FUTURE_WINDOW_DAYS = 42;
+
 /**
  * @param {string} path
  * @returns {Promise<object | null>}
@@ -25,6 +28,113 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll("\"", "&quot;");
+}
+
+/**
+ * @param {string} isoDate
+ * @param {number} days
+ * @returns {string}
+ */
+function addIsoDays(isoDate, days) {
+  const date = new Date(`${isoDate}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * @param {string} isoDate
+ * @returns {string}
+ */
+function isoToDdmm(isoDate) {
+  return `${isoDate.slice(8, 10)}/${isoDate.slice(5, 7)}`;
+}
+
+/**
+ * @param {Array<any>} records
+ * @returns {{ extractedAt: string, shifts: object[] } | null}
+ */
+function buildScheduleData(records) {
+  let extractedAt = null;
+  const shifts = records
+    .filter((record) => record?.current?.schedule)
+    .map((record) => {
+      const scheduleExtractedAt = record.sources?.scheduleExtractedAt ?? null;
+      if (scheduleExtractedAt && (!extractedAt || scheduleExtractedAt > extractedAt)) {
+        extractedAt = scheduleExtractedAt;
+      }
+
+      return {
+        date: record.date,
+        day: record.day,
+        ...record.current.schedule,
+      };
+    })
+    .sort((left, right) => left.date.localeCompare(right.date));
+
+  if (!extractedAt || shifts.length === 0) {
+    return null;
+  }
+
+  return { extractedAt, shifts };
+}
+
+/**
+ * @param {Array<any>} records
+ * @param {string} todayIso
+ * @returns {{ extractedAt: string, period: string, entries: object[] } | null}
+ */
+function buildTimecardData(records, todayIso) {
+  const fromIso = addIsoDays(todayIso, -(PAST_WINDOW_DAYS - 1));
+  let extractedAt = null;
+
+  const entries = records
+    .filter((record) => record?.current?.timecard && record.date >= fromIso && record.date <= todayIso)
+    .map((record) => {
+      const timecardExtractedAt = record.sources?.timecardExtractedAt ?? null;
+      if (timecardExtractedAt && (!extractedAt || timecardExtractedAt > extractedAt)) {
+        extractedAt = timecardExtractedAt;
+      }
+
+      return {
+        date: isoToDdmm(record.date),
+        day: record.day,
+        isoDate: record.date,
+        ...record.current.timecard,
+      };
+    })
+    .sort((left, right) => left.isoDate.localeCompare(right.isoDate));
+
+  if (!extractedAt || entries.length === 0) {
+    return null;
+  }
+
+  return {
+    extractedAt,
+    period: `Last ${PAST_WINDOW_DAYS} Days`,
+    entries,
+  };
+}
+
+/**
+ * @param {string} todayIso
+ * @returns {Promise<Array<any>>}
+ */
+async function loadDayRecords(todayIso) {
+  const index = await fetchJson("./data/index.json");
+  const dates = Array.isArray(index?.dates) ? index.dates : [];
+  if (dates.length === 0) {
+    return [];
+  }
+
+  const fromIso = addIsoDays(todayIso, -(PAST_WINDOW_DAYS - 1));
+  const toIso = addIsoDays(todayIso, FUTURE_WINDOW_DAYS);
+  const visibleDates = dates.filter((date) => date >= fromIso && date <= toIso);
+
+  const records = await Promise.all(
+    visibleDates.map((date) => fetchJson(`./data/days/${date}.json`))
+  );
+
+  return records.filter(Boolean);
 }
 
 /** @type {Record<string, string>} */
@@ -220,17 +330,16 @@ async function main() {
   }
 
   try {
-    const [schedule, websiteTimecard, latestTimecard] = await Promise.all([
-      fetchJson("./data/schedule-latest.json"),
-      fetchJson("./data/timecard-website.json"),
-      fetchJson("./data/timecard-latest.json"),
-    ]);
-    const timecard = websiteTimecard ?? latestTimecard;
+    const now = new Date().toISOString();
+    const todayIso = now.slice(0, 10);
+    const records = await loadDayRecords(todayIso);
+    const schedule = buildScheduleData(records);
+    const timecard = buildTimecardData(records, todayIso);
 
     const model = buildWebsiteViewModel({
       schedule,
       timecard,
-      now: new Date().toISOString(),
+      now,
     });
 
     root.innerHTML = `

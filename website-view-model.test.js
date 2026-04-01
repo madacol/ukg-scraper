@@ -299,8 +299,12 @@ test("computeDayMinutes: uses total when available", () => {
   assert.strictEqual(computeDayMinutes({ total: "5:00", timeRange: "9:00 - 14:00" }), 300);
 });
 
-test("computeDayMinutes: falls back to timeRange when no total", () => {
-  assert.strictEqual(computeDayMinutes({ total: null, timeRange: "9:00 - 14:00" }), 300);
+test("computeDayMinutes: falls back to timeRange for non-past days when no total", () => {
+  assert.strictEqual(computeDayMinutes({ total: null, timeRange: "9:00 - 14:00", isPast: false }), 300);
+});
+
+test("computeDayMinutes: past scheduled day without total returns 0", () => {
+  assert.strictEqual(computeDayMinutes({ total: null, timeRange: "9:00 - 14:00", isPast: true }), 0);
 });
 
 test("computeDayMinutes: returns 0 for Off", () => {
@@ -312,7 +316,31 @@ test("computeDayMinutes: returns 0 for null timeRange", () => {
 });
 
 test("computeDayMinutes: handles leading zeros in timeRange", () => {
-  assert.strictEqual(computeDayMinutes({ total: null, timeRange: "09:00 - 19:00" }), 600);
+  assert.strictEqual(computeDayMinutes({ total: null, timeRange: "09:00 - 19:00", isPast: false }), 600);
+});
+
+test("buildWebsiteViewModel: weekGroups do not count past scheduled days without timecard totals", () => {
+  const schedule = {
+    extractedAt: "2026-03-30T10:00:00.000Z",
+    shifts: [
+      { date: "2026-03-29", day: "Sun", start: "9:00", end: "14:00", off: false, note: null },
+      { date: "2026-03-30", day: "Mon", start: "9:00", end: "14:00", off: false, note: null },
+    ],
+  };
+
+  const timecard = {
+    extractedAt: "2026-03-30T10:00:00.000Z",
+    period: "Last 2 Weeks",
+    entries: [
+      { date: "29/03", day: "Sun", clockIn1: null, clockOut1: null, dailyTotal: null },
+      { date: "30/03", day: "Mon", clockIn1: "09:00", clockOut1: "14:00", dailyTotal: "5:00" },
+    ],
+  };
+
+  const model = buildWebsiteViewModel({ schedule, timecard, now: "2026-03-30T12:00:00.000Z" });
+  const week = model.weekGroups.find((group) => group.weekLabel.includes("23") && group.weekLabel.includes("29"));
+  assert.ok(week);
+  assert.strictEqual(week.totalFormatted, "");
 });
 
 // ── shiftType in timelineDays ──

@@ -3,7 +3,15 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import nodemailer from "nodemailer";
-import { buildWebsiteTimecardData, saveWebsiteTimecardData } from "./website-data.js";
+import {
+  addIsoDays,
+  buildBreakSegmentsFromStore,
+  buildScheduleDataFromStore,
+  buildTimecardDataFromStore,
+  persistScheduleData,
+  persistTimecardData,
+  writeDayIndex,
+} from "./day-store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "data");
@@ -90,74 +98,20 @@ function runScrapers(config) {
   return parseScraperResult(result);
 }
 
-function saveData(name, date, data) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  const dated = path.join(DATA_DIR, `${name}-${date}.json`);
-  const latest = path.join(DATA_DIR, `${name}-latest.json`);
-  const json = JSON.stringify(data, null, 2);
-  fs.writeFileSync(dated, json);
-  fs.writeFileSync(latest, json);
-  return dated;
-}
-
-function refreshWebsiteTimecard(date) {
-  const websiteTimecard = buildWebsiteTimecardData({
-    dataDir: DATA_DIR,
-    todayIso: date,
-    windowDays: 30,
-  });
-
-  if (!websiteTimecard) {
-    return null;
-  }
-
-  return saveWebsiteTimecardData(DATA_DIR, websiteTimecard);
-}
-
-function loadLatest(name) {
-  const p = path.join(DATA_DIR, `${name}-latest.json`);
-  if (!fs.existsSync(p)) return null;
-  return JSON.parse(fs.readFileSync(p, "utf8"));
-}
-
-const BREAKS_PATH = path.join(DATA_DIR, "break-segments.json");
-
 /**
- * Load the persistent break-segments cache (date → segments).
- * @returns {Record<string, {start: string, end: string}[]>}
- */
-function loadBreakSegments() {
-  if (!fs.existsSync(BREAKS_PATH)) return {};
-  return JSON.parse(fs.readFileSync(BREAKS_PATH, "utf8"));
-}
-
-/**
- * Merge schedule segment data into the break-segments cache.
- * Only stores dates that have >1 segment (i.e. a scheduled break).
- * Prunes entries older than 30 days.
+ * Merge schedule segment data into an existing break-segments map.
+ * @param {Record<string, {start: string, end: string}[]>} cache
  * @param {{ shifts: Array<{ date: string, segments: {start: string, end: string}[] }> }} scheduleData
- * @param {boolean} persist - Whether to write to disk
  * @returns {Record<string, {start: string, end: string}[]>}
  */
-function updateBreakSegments(scheduleData, persist) {
-  const cache = loadBreakSegments();
-  for (const s of scheduleData.shifts) {
-    if (s.segments && s.segments.length > 1) {
-      cache[s.date] = s.segments;
+function mergeBreakSegments(cache, scheduleData) {
+  const merged = { ...cache };
+  for (const shift of scheduleData.shifts) {
+    if (shift.segments && shift.segments.length > 1) {
+      merged[shift.date] = shift.segments;
     }
   }
-  // Prune entries older than 30 days
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - 30);
-  const cutoffStr = cutoff.toISOString().slice(0, 10);
-  for (const date of Object.keys(cache)) {
-    if (date < cutoffStr) delete cache[date];
-  }
-  if (persist) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(BREAKS_PATH, JSON.stringify(cache, null, 2));
-  }
-  return cache;
+  return merged;
 }
 
 // --- Formatting helpers ---
@@ -316,6 +270,33 @@ function parseTime(str) {
 }
 
 /**
+ * @param {string} isoDate
+ * @returns {string}
+ */
+function isoToDdmm(isoDate) {
+  return `${isoDate.slice(8, 10)}/${isoDate.slice(5, 7)}`;
+}
+
+/**
+ * @param {Record<string, string | null | undefined> | undefined} entry
+ * @returns {boolean}
+ */
+function hasTimecardActivity(entry) {
+  if (!entry) return false;
+  return Boolean(
+    entry.absence ||
+    entry.clockIn1 ||
+    entry.clockOut1 ||
+    entry.clockIn2 ||
+    entry.clockOut2 ||
+    entry.payCode ||
+    entry.amount ||
+    entry.shiftTotal ||
+    entry.dailyTotal
+  );
+}
+
+/**
  * @param {{ shifts: Array<{ date: string, day: string, start: string | null, end: string | null, off: boolean }> } | null} scheduleData
  * @param {{ entries: Array<{ date: string, day: string, clockIn1?: string | null, clockOut1?: string | null }> } | null} timecardData
  * @param {string} [dateOverride]
@@ -336,26 +317,19 @@ function detectTimecardDiscrepancy(scheduleData, timecardData, dateOverride) {
 
   const lines = [];
   const THRESHOLD = 50;
-  const segments = todayShift.segments || [{ start: todayShift.start, end: todayShift.end }];
+  const finalClockOut = todayEntry.clockOut2 || todayEntry.clockOut1;
 
-  /** @type {Array<{ inKey: string, outKey: string, label: string, segment: { start: string | null, end: string | null } }>} */
-  const pairs = [
-    { inKey: "clockIn1", outKey: "clockOut1", label: "", segment: segments[0] },
-    { inKey: "clockIn2", outKey: "clockOut2", label: "2", segment: segments[1] || segments[0] },
-  ];
-
-  for (const { inKey, outKey, label, segment } of pairs) {
-    if (todayEntry[inKey] && segment.start) {
-      const diff = Math.abs(parseTime(todayEntry[inKey]) - parseTime(segment.start));
-      if (diff > THRESHOLD) {
-        lines.push(`  Clock In${label}:  ${todayEntry[inKey]} (scheduled ${segment.start}, ${diff} min off)`);
-      }
+  if (todayEntry.clockIn1 && todayShift.start) {
+    const diff = Math.abs(parseTime(todayEntry.clockIn1) - parseTime(todayShift.start));
+    if (diff > THRESHOLD) {
+      lines.push(`  Clock In:  ${todayEntry.clockIn1} (scheduled ${todayShift.start}, ${diff} min off)`);
     }
-    if (todayEntry[outKey] && segment.end) {
-      const diff = Math.abs(parseTime(todayEntry[outKey]) - parseTime(segment.end));
-      if (diff > THRESHOLD) {
-        lines.push(`  Clock Out${label}: ${todayEntry[outKey]} (scheduled ${segment.end}, ${diff} min off)`);
-      }
+  }
+
+  if (finalClockOut && todayShift.end) {
+    const diff = Math.abs(parseTime(finalClockOut) - parseTime(todayShift.end));
+    if (diff > THRESHOLD) {
+      lines.push(`  Clock Out: ${finalClockOut} (scheduled ${todayShift.end}, ${diff} min off)`);
     }
   }
 
@@ -450,6 +424,42 @@ function detectTimecardChanges(oldData, newData, scheduleData) {
 }
 
 /**
+ * Detect scheduled past days that have no matching timecard activity.
+ * @param {{ shifts: Array<{ date: string, day: string, start: string | null, end: string | null, off: boolean, note?: string | null }> } | null} scheduleData
+ * @param {{ entries: Array<Record<string, string | null | undefined>> } | null} timecardData
+ * @param {string} [todayIso]
+ * @returns {string[] | null}
+ */
+function detectMissingTimecardEntries(scheduleData, timecardData, todayIso) {
+  if (!scheduleData || !timecardData) return null;
+
+  const cutoffIso = todayIso ?? new Date().toISOString().slice(0, 10);
+  const entryByDdmm = {};
+  for (const entry of timecardData.entries) {
+    if (typeof entry.date === "string") {
+      entryByDdmm[entry.date] = entry;
+    }
+  }
+
+  const missing = [];
+  for (const shift of scheduleData.shifts) {
+    if (shift.off || shift.date >= cutoffIso) {
+      continue;
+    }
+
+    const entry = entryByDdmm[isoToDdmm(shift.date)];
+    if (hasTimecardActivity(entry)) {
+      continue;
+    }
+
+    const label = formatIsoDate(shift.day, shift.date);
+    missing.push(`${label}\n  Scheduled: ${formatShift(shift)}\n  Timecard: missing`);
+  }
+
+  return missing.length > 0 ? missing : null;
+}
+
+/**
  * Detect mismatches between calculated daily total (from clock pairs)
  * and the scraped daily total reported by UKG.
  * Accept either the raw clock total or the break-adjusted total, and ignore
@@ -531,13 +541,14 @@ async function main() {
   const alerts = [];
 
   // Load previous data before overwriting
-  const prevSchedule = loadLatest("schedule");
-  const prevTimecard = loadLatest("timecard");
+  const prevSchedule = buildScheduleDataFromStore(DATA_DIR);
+  const prevTimecard = buildTimecardDataFromStore(DATA_DIR);
 
   // Run unified scraper (single login, parallel scrapes)
   log("Running scrapers...");
   let scheduleData;
   let timecardData;
+  let storeChanged = false;
   try {
     const result = runScrapers(config);
 
@@ -549,31 +560,35 @@ async function main() {
     if (result.schedule) {
       scheduleData = result.schedule;
       if (!dryRun) {
-        saveData("schedule", date, scheduleData);
-        log(`Schedule saved: data/schedule-${date}.json`);
+        const persisted = persistScheduleData(DATA_DIR, scheduleData);
+        log(`Schedule stored: ${persisted.changedDates.length} day(s) updated`);
+        storeChanged = true;
       }
     }
 
     if (result.timecard) {
       timecardData = result.timecard;
       if (!dryRun) {
-        saveData("timecard", date, timecardData);
-        log(`Timecard saved: data/timecard-${date}.json`);
-        const websitePath = refreshWebsiteTimecard(date);
-        if (websitePath) {
-          log(`Website timecard saved: ${path.relative(__dirname, websitePath)}`);
-        }
+        const persisted = persistTimecardData(DATA_DIR, timecardData);
+        log(`Timecard stored: ${persisted.changedDates.length} day(s) updated`);
+        storeChanged = true;
       }
+    }
+
+    if (!dryRun && storeChanged) {
+      const indexPath = writeDayIndex(DATA_DIR);
+      log(`Day index saved: ${path.relative(__dirname, indexPath)}`);
     }
   } catch (err) {
     log(`Scraper failed: ${err.message}`);
     alerts.push("Scraper FAILED:\n  " + err.message);
   }
 
-  // Update break-segments cache with current schedule
-  let breakCache = loadBreakSegments();
+  // Build break segments from stored day files and merge in the current scrape
+  const breakWindowStart = addIsoDays(date, -30);
+  let breakCache = buildBreakSegmentsFromStore(DATA_DIR, { from: breakWindowStart, to: date });
   if (scheduleData) {
-    breakCache = updateBreakSegments(scheduleData, !dryRun);
+    breakCache = mergeBreakSegments(breakCache, scheduleData);
   }
 
   // Detect changes
@@ -597,6 +612,11 @@ async function main() {
       alerts.push(formatAlert("TIMECARD CHANGES", timecardChanges));
     }
 
+    const missingTimecard = detectMissingTimecardEntries(scheduleData, timecardData, date);
+    if (missingTimecard) {
+      alerts.push(formatAlert("TIMECARD MISSING", missingTimecard));
+    }
+
     const totalMismatch = detectTotalMismatch(timecardData, breakCache);
     if (totalMismatch) {
       alerts.push(formatAlert("TIMECARD TOTAL MISMATCH", totalMismatch));
@@ -609,6 +629,7 @@ async function main() {
     if (alerts.some((a) => a.startsWith("SCHEDULE"))) subjects.push("Schedule changed");
     if (alerts.some((a) => a.startsWith("TIMECARD vs"))) subjects.push("Timecard mismatch");
     if (alerts.some((a) => a.startsWith("TIMECARD CHANGES"))) subjects.push("Timecard changed");
+    if (alerts.some((a) => a.startsWith("TIMECARD MISSING"))) subjects.push("Timecard missing");
     if (alerts.some((a) => a.startsWith("TIMECARD TOTAL"))) subjects.push("Total mismatch");
     if (alerts.some((a) => a.includes("FAILED"))) subjects.push("Scraper error");
 
@@ -636,6 +657,7 @@ async function main() {
 export {
   formatShift, detectScheduleChanges, detectTimecardDiscrepancy, detectTimecardChanges,
   parseTime, formatAlert, calculateDailyTotal, formatClockPairs, detectTotalMismatch,
+  detectMissingTimecardEntries,
   parseScraperResult, tailOutput,
 };
 
