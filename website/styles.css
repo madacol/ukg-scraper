@@ -353,15 +353,34 @@ main {
 
 .day-total {
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
   font-size: 0.88rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--muted);
   padding-top: 1px;
+  line-height: 1.2;
+}
+
+.day-total-primary {
+  color: inherit;
+}
+
+.day-total-calculated {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--subtle);
 }
 
 .day-today .day-total {
   color: var(--accent);
+}
+
+.day-today .day-total-calculated {
+  color: var(--subtle);
 }
 
 /* ── Legend ── */

@@ -204,6 +204,13 @@ function renderDay(day) {
     details.push(`<span class="day-note">${escapeHtml(day.note)}</span>`);
   }
 
+  const totalHtml = day.scrapedTotal || day.calculatedTotal
+    ? `<div class="day-total">
+        ${day.scrapedTotal ? `<span class="day-total-primary">${escapeHtml(day.scrapedTotal)}</span>` : ""}
+        ${day.calculatedTotal ? `<span class="day-total-calculated">Calc ${escapeHtml(day.calculatedTotal)}</span>` : ""}
+      </div>`
+    : "";
+
   return `
     <article class="${cls}" ${day.isToday ? 'id="today"' : ""}>
       <div class="day-left">
@@ -212,7 +219,7 @@ function renderDay(day) {
         ${isOff ? `<span class="day-off">Off</span>` : ""}
         ${details.length > 0 ? `<div class="day-details">${details.join("")}</div>` : ""}
       </div>
-      ${day.total ? `<span class="day-total">${escapeHtml(day.total)}</span>` : ""}
+      ${totalHtml}
     </article>
   `;
 }
@@ -316,7 +323,8 @@ function renderHeader(model) {
         }
       </div>
       <div class="header-right">
-        <span class="stat">${escapeHtml(model.timecardSummary.totalHours)} <small>worked</small></span>
+        <span class="stat">${escapeHtml(model.timecardSummary.scrapedHours)} <small>UKG</small></span>
+        <span class="stat">${escapeHtml(model.timecardSummary.calculatedHours)} <small>calc</small></span>
         <span class="stat">${model.timecardSummary.trackedDays} <small>days</small></span>
       </div>
     </header>

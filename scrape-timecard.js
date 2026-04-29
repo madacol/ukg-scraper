@@ -50,13 +50,14 @@ async function main() {
         .filter((value) => value !== null)
         .sort((left, right) => left - right);
 
+      let currentEntry = null;
+
       for (const i of rowIndexes) {
         const dateEl = document.getElementById(`${i}_date`);
         if (!dateEl) continue;
 
         const dateText = dateEl.getAttribute("title") || dateEl.innerText.trim();
         const match = dateText.match(/(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\d{2}\/\d{2})/);
-        if (!match) continue;
 
         const cell = (col) => {
           const el = document.getElementById(`${i}_${col}`);
@@ -75,20 +76,76 @@ async function main() {
           return val || null;
         };
 
-        entries.push({
+        const numberedColumns = (base) => Array.from(document.querySelectorAll(`[id^="${i}_${base}"]`))
+          .map((element) => {
+            const escapedBase = base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const match = element.id.match(new RegExp(`^${i}_${escapedBase}(\\d*)$`));
+            if (!match) return null;
+            return { col: `${base}${match[1]}`, n: match[1] ? Number(match[1]) : 1 };
+          })
+          .filter(Boolean)
+          .sort((left, right) => left.n - right.n)
+          .map((item) => item.col);
+
+        const lastValue = (base) => {
+          const values = numberedColumns(base).map((col) => cell(col)).filter(Boolean);
+          return values.length > 0 ? values[values.length - 1] : null;
+        };
+
+        const nextPunchIndex = (entry) => {
+          let next = 1;
+          while (entry[`clockIn${next}`] || entry[`clockOut${next}`]) next += 1;
+          return next;
+        };
+
+        const appendPunches = (entry) => {
+          const inPunchColumns = numberedColumns("inpunch");
+          const outPunchColumns = numberedColumns("outpunch");
+          const maxPunches = Math.max(inPunchColumns.length, outPunchColumns.length);
+          for (let punchIndex = 1; punchIndex <= maxPunches; punchIndex += 1) {
+            const suffix = punchIndex === 1 ? "" : String(punchIndex);
+            const clockIn = cell(`inpunch${suffix}`);
+            const clockOut = cell(`outpunch${suffix}`);
+            if (!clockIn && !clockOut) continue;
+            const targetIndex = nextPunchIndex(entry);
+            entry[`clockIn${targetIndex}`] = clockIn;
+            entry[`clockOut${targetIndex}`] = clockOut;
+          }
+        };
+
+        const applyTotals = (entry) => {
+          entry.shiftTotal = lastValue("workedshifttotal") || entry.shiftTotal || null;
+          entry.dailyTotal = lastValue("dailytotal") || lastValue("workedshifttotal") || entry.dailyTotal || null;
+        };
+
+        if (!match) {
+          if (currentEntry) {
+            appendPunches(currentEntry);
+            applyTotals(currentEntry);
+          }
+          continue;
+        }
+
+        currentEntry = {
           date: match[2],
           day: match[1],
           schedule: cell("scheduleshift"),
           absence: cell("absence"),
-          clockIn1: cell("inpunch"),
-          clockOut1: cell("outpunch"),
-          clockIn2: cell("inpunch2"),
-          clockOut2: cell("outpunch2"),
           payCode: cell("name"),
           amount: cell("amount"),
-          shiftTotal: cell("workedshifttotal"),
-          dailyTotal: cell("dailytotal"),
-        });
+          shiftTotal: null,
+          dailyTotal: null,
+        };
+
+        appendPunches(currentEntry);
+        applyTotals(currentEntry);
+
+        currentEntry.clockIn1 ??= null;
+        currentEntry.clockOut1 ??= null;
+        currentEntry.clockIn2 ??= null;
+        currentEntry.clockOut2 ??= null;
+
+        entries.push(currentEntry);
       }
 
       return entries;

@@ -32,6 +32,7 @@
  *   clockOut1?: string | null,
  *   clockIn2?: string | null,
  *   clockOut2?: string | null,
+ *   [key: string]: unknown,
  *   payCode?: string | null,
  *   amount?: string | null,
  *   shiftTotal?: string | null,
@@ -81,6 +82,8 @@
  *   note: string | null,
  *   punches: string | null,
  *   total: string | null,
+ *   scrapedTotal: string | null,
+ *   calculatedTotal: string | null,
  *   payCode: string | null,
  *   shiftType: ShiftType | null,
  *   isNonStandard: boolean,
@@ -111,6 +114,8 @@
  *     isStale: boolean,
  *     trackedDays: number,
  *     totalHours: string,
+ *     scrapedHours: string,
+ *     calculatedHours: string,
  *     period: string | null,
  *   },
  *   upcomingShifts: UpcomingShiftCard[],
@@ -252,15 +257,37 @@ function formatPunches(entry) {
   /** @type {string[]} */
   const parts = [];
 
-  if (entry.clockIn1) {
-    parts.push(`${entry.clockIn1} - ${entry.clockOut1 ?? "?"}`);
-  }
-
-  if (entry.clockIn2) {
-    parts.push(`${entry.clockIn2} - ${entry.clockOut2 ?? "?"}`);
+  for (let i = 1; i <= 10; i += 1) {
+    const clockIn = entry[`clockIn${i}`];
+    const clockOut = entry[`clockOut${i}`];
+    if (clockIn) {
+      parts.push(`${clockIn} - ${clockOut ?? "?"}`);
+    }
   }
 
   return parts.length > 0 ? parts.join(", ") : null;
+}
+
+/**
+ * @param {TimecardEntry} entry
+ * @returns {string | null}
+ */
+function calculatePunchTotal(entry) {
+  let minutes = 0;
+
+  for (let i = 1; i <= 10; i += 1) {
+    const clockIn = typeof entry[`clockIn${i}`] === "string" ? entry[`clockIn${i}`] : null;
+    const clockOut = typeof entry[`clockOut${i}`] === "string" ? entry[`clockOut${i}`] : null;
+    if (!clockIn || !clockOut) continue;
+
+    const inMinutes = parseTimeToMinutes(clockIn);
+    const outMinutes = parseTimeToMinutes(clockOut);
+    if (outMinutes > inMinutes) {
+      minutes += outMinutes - inMinutes;
+    }
+  }
+
+  return minutes > 0 ? formatDuration(minutes) : null;
 }
 
 /**
@@ -488,6 +515,8 @@ function buildWebsiteViewModel(input) {
       note: shift.note,
       punches: null,
       total: null,
+      scrapedTotal: null,
+      calculatedTotal: null,
       payCode: null,
       shiftType,
       isNonStandard,
@@ -499,13 +528,17 @@ function buildWebsiteViewModel(input) {
     const isoDate = getTimecardIsoDate(entry, referenceDate);
     const existing = dayMap.get(isoDate);
     const punches = formatPunches(entry);
-    const total = entry.dailyTotal ?? entry.shiftTotal ?? null;
+    const scrapedTotal = entry.dailyTotal ?? entry.shiftTotal ?? null;
+    const calculatedTotal = calculatePunchTotal(entry);
+    const total = scrapedTotal;
     const payCode = entry.payCode ?? null;
     const timecardSchedule = entry.schedule ?? null;
 
     if (existing) {
       existing.punches = punches;
       existing.total = total;
+      existing.scrapedTotal = scrapedTotal;
+      existing.calculatedTotal = calculatedTotal;
       existing.payCode = payCode;
       if (!existing.timeRange && timecardSchedule) {
         existing.timeRange = timecardSchedule;
@@ -522,6 +555,8 @@ function buildWebsiteViewModel(input) {
         note: null,
         punches,
         total,
+        scrapedTotal,
+        calculatedTotal,
         payCode,
         shiftType,
         isNonStandard,
@@ -551,6 +586,8 @@ function buildWebsiteViewModel(input) {
         note: null,
         punches: null,
         total: null,
+        scrapedTotal: null,
+        calculatedTotal: null,
         payCode: null,
         shiftType: null,
         isNonStandard: false,
@@ -560,6 +597,10 @@ function buildWebsiteViewModel(input) {
 
   const timelineDays = [...dayMap.values()].sort((a, b) => a.date.localeCompare(b.date));
   const weekGroups = buildWeekGroups(timelineDays);
+  const calculatedMinutes = (input.timecard?.entries ?? []).reduce((sum, entry) => {
+    const minutes = parseDuration(calculatePunchTotal(entry));
+    return sum + (minutes ?? 0);
+  }, 0);
 
   return {
     todayIso,
@@ -576,6 +617,8 @@ function buildWebsiteViewModel(input) {
       isStale: timecardFreshness.isStale,
       trackedDays: input.timecard?.entries.length ?? 0,
       totalHours: formatDuration(totalMinutes),
+      scrapedHours: formatDuration(totalMinutes),
+      calculatedHours: formatDuration(calculatedMinutes),
       period: input.timecard?.period ?? null,
     },
     upcomingShifts,

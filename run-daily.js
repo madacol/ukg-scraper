@@ -133,11 +133,16 @@ const FIELD_LABELS = {
  */
 function formatClockPairs(entry) {
   const pairs = [];
-  if (entry.clockIn1) {
-    pairs.push(`${entry.clockIn1} - ${entry.clockOut1 ?? "?"}`);
-  }
-  if (entry.clockIn2) {
-    pairs.push(`${entry.clockIn2} - ${entry.clockOut2 ?? "?"}`);
+  for (let i = 1; ; i += 1) {
+    const clockIn = entry[`clockIn${i}`];
+    const clockOut = entry[`clockOut${i}`];
+    if (!clockIn && !clockOut) {
+      if (i > 10) break;
+      continue;
+    }
+    if (clockIn) {
+      pairs.push(`${clockIn} - ${clockOut ?? "?"}`);
+    }
   }
   return pairs.length > 0 ? pairs.join(", ") : null;
 }
@@ -153,18 +158,17 @@ function formatClockPairs(entry) {
  */
 function calculateDailyTotal(entry, hasScheduledBreak) {
   let totalMinutes = 0;
-  const in1 = parseTime(entry.clockIn1);
-  const out1 = parseTime(entry.clockOut1);
-  if (in1 !== null && out1 !== null) {
-    totalMinutes += out1 - in1;
-  }
-  const in2 = parseTime(entry.clockIn2);
-  const out2 = parseTime(entry.clockOut2);
-  if (in2 !== null && out2 !== null) {
-    totalMinutes += out2 - in2;
+  let completePairs = 0;
+  for (let i = 1; i <= 10; i += 1) {
+    const clockIn = parseTime(entry[`clockIn${i}`]);
+    const clockOut = parseTime(entry[`clockOut${i}`]);
+    if (clockIn !== null && clockOut !== null) {
+      totalMinutes += clockOut - clockIn;
+      completePairs += 1;
+    }
   }
   if (totalMinutes <= 0) return null;
-  if (hasScheduledBreak && in2 !== null && out2 !== null) {
+  if (hasScheduledBreak && completePairs > 1) {
     totalMinutes += 5; // UKG adds a 5-minute paid break bonus
   }
   const hours = Math.floor(totalMinutes / 60);
@@ -203,6 +207,22 @@ function formatDdmm(day, ddmm) {
  */
 function formatAlert(title, items) {
   return `${title}\n${"-".repeat(title.length)}\n${items.join("\n\n")}`;
+}
+
+/**
+ * Keep only alert items that are new or textually changed compared with the
+ * previous run.
+ * @param {string[] | null | undefined} currentItems
+ * @param {string[] | null | undefined} previousItems
+ * @returns {string[] | null}
+ */
+function filterNewOrChangedItems(currentItems, previousItems) {
+  if (!currentItems || currentItems.length === 0) return null;
+  if (!previousItems || previousItems.length === 0) return currentItems;
+
+  const previousSet = new Set(previousItems);
+  const filtered = currentItems.filter((item) => !previousSet.has(item));
+  return filtered.length > 0 ? filtered : null;
 }
 
 // --- Change detection ---
@@ -283,12 +303,11 @@ function isoToDdmm(isoDate) {
  */
 function hasTimecardActivity(entry) {
   if (!entry) return false;
+  for (let i = 1; i <= 10; i += 1) {
+    if (entry[`clockIn${i}`] || entry[`clockOut${i}`]) return true;
+  }
   return Boolean(
     entry.absence ||
-    entry.clockIn1 ||
-    entry.clockOut1 ||
-    entry.clockIn2 ||
-    entry.clockOut2 ||
     entry.payCode ||
     entry.amount ||
     entry.shiftTotal ||
@@ -300,12 +319,14 @@ function hasTimecardActivity(entry) {
  * @param {{ shifts: Array<{ date: string, day: string, start: string | null, end: string | null, off: boolean }> } | null} scheduleData
  * @param {{ entries: Array<{ date: string, day: string, clockIn1?: string | null, clockOut1?: string | null }> } | null} timecardData
  * @param {string} [dateOverride]
+ * @param {string | Date} [nowOverride]
  * @returns {string[] | null}
  */
-function detectTimecardDiscrepancy(scheduleData, timecardData, dateOverride) {
+function detectTimecardDiscrepancy(scheduleData, timecardData, dateOverride, nowOverride) {
   if (!scheduleData || !timecardData) return null;
 
-  const d = dateOverride ? new Date(dateOverride + "T00:00:00") : new Date();
+  const now = nowOverride instanceof Date ? nowOverride : (nowOverride ? new Date(nowOverride) : new Date());
+  const d = dateOverride ? new Date(dateOverride + "T00:00:00") : now;
   const todayStr = d.toISOString().slice(0, 10);
   const todayShift = scheduleData.shifts.find((s) => s.date === todayStr && !s.off);
   if (!todayShift) return null;
@@ -313,13 +334,29 @@ function detectTimecardDiscrepancy(scheduleData, timecardData, dateOverride) {
   // Timecard dates are DD/MM format — match against today
   const ddmm = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
   const todayEntry = timecardData.entries.find((e) => e.date === ddmm);
-  if (!todayEntry || (!todayEntry.clockIn1 && !todayEntry.clockOut1)) return null;
 
   const lines = [];
   const THRESHOLD = 50;
-  const finalClockOut = todayEntry.clockOut2 || todayEntry.clockOut1;
+  const nowIso = now.toISOString().slice(0, 10);
+  let finalClockOut = null;
+  if (todayEntry) {
+    for (let i = 1; i <= 10; i += 1) {
+      finalClockOut = todayEntry[`clockOut${i}`] || finalClockOut;
+    }
+  }
 
-  if (todayEntry.clockIn1 && todayShift.start) {
+  if (!todayEntry?.clockIn1 && todayShift.start && todayStr === nowIso) {
+    const scheduledStart = parseTime(todayShift.start);
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    if (scheduledStart !== null) {
+      const diff = nowMinutes - scheduledStart;
+      if (diff > THRESHOLD) {
+        lines.push(`  Clock In:  missing (scheduled ${todayShift.start}, ${diff} min late)`);
+      }
+    }
+  }
+
+  if (todayEntry?.clockIn1 && todayShift.start) {
     const diff = Math.abs(parseTime(todayEntry.clockIn1) - parseTime(todayShift.start));
     if (diff > THRESHOLD) {
       lines.push(`  Clock In:  ${todayEntry.clockIn1} (scheduled ${todayShift.start}, ${diff} min off)`);
@@ -378,7 +415,10 @@ function detectTimecardChanges(oldData, newData, scheduleData) {
       if (lines.length > 0) {
         const shift = shiftByDdmm[e.date];
         if (scheduleData) {
-          const hasCompletePair = (e.clockIn1 && e.clockOut1) || (e.clockIn2 && e.clockOut2);
+          let hasCompletePair = false;
+          for (let i = 1; i <= 10; i += 1) {
+            hasCompletePair ||= Boolean(e[`clockIn${i}`] && e[`clockOut${i}`]);
+          }
           const isOff = !shift || shift.off;
           if (isOff && !hasCompletePair) continue;
           if (shift && !shift.off && shift.start && shift.end) {
@@ -397,8 +437,10 @@ function detectTimecardChanges(oldData, newData, scheduleData) {
     }
 
     const lines = [];
-    const clockChanged = prev.clockIn1 !== e.clockIn1 || prev.clockOut1 !== e.clockOut1 ||
-                          prev.clockIn2 !== e.clockIn2 || prev.clockOut2 !== e.clockOut2;
+    let clockChanged = false;
+    for (let i = 1; i <= 10; i += 1) {
+      clockChanged ||= prev[`clockIn${i}`] !== e[`clockIn${i}`] || prev[`clockOut${i}`] !== e[`clockOut${i}`];
+    }
     if (clockChanged) {
       const oldPairs = formatClockPairs(prev);
       const newPairs = formatClockPairs(e);
@@ -543,6 +585,7 @@ async function main() {
   // Load previous data before overwriting
   const prevSchedule = buildScheduleDataFromStore(DATA_DIR);
   const prevTimecard = buildTimecardDataFromStore(DATA_DIR);
+  const prevBreakCache = prevSchedule ? mergeBreakSegments({}, prevSchedule) : {};
 
   // Run unified scraper (single login, parallel scrapes)
   log("Running scrapers...");
@@ -617,7 +660,10 @@ async function main() {
       alerts.push(formatAlert("TIMECARD MISSING", missingTimecard));
     }
 
-    const totalMismatch = detectTotalMismatch(timecardData, breakCache);
+    const totalMismatch = filterNewOrChangedItems(
+      detectTotalMismatch(timecardData, breakCache),
+      detectTotalMismatch(prevTimecard, prevBreakCache)
+    );
     if (totalMismatch) {
       alerts.push(formatAlert("TIMECARD TOTAL MISMATCH", totalMismatch));
     }
@@ -657,7 +703,7 @@ async function main() {
 export {
   formatShift, detectScheduleChanges, detectTimecardDiscrepancy, detectTimecardChanges,
   parseTime, formatAlert, calculateDailyTotal, formatClockPairs, detectTotalMismatch,
-  detectMissingTimecardEntries,
+  detectMissingTimecardEntries, filterNewOrChangedItems,
   parseScraperResult, tailOutput,
 };
 

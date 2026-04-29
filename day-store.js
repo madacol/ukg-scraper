@@ -164,6 +164,58 @@ function normalizeTimecardValue(entry) {
 }
 
 /**
+ * @param {Record<string, unknown> | null | undefined} entry
+ * @returns {number}
+ */
+function maxPunchIndex(entry) {
+  if (!entry) return 0;
+  let max = 0;
+  for (const key of Object.keys(entry)) {
+    const match = key.match(/^clock(?:In|Out)(\d+)$/);
+    if (match && entry[key] != null && entry[key] !== "") {
+      max = Math.max(max, Number(match[1]));
+    }
+  }
+  return max;
+}
+
+/**
+ * Preserve already-scraped past-day punch tails when a later UKG grid scrape
+ * returns the same leading pairs but omits later pairs/totals.
+ * @param {Record<string, unknown> | null | undefined} current
+ * @param {Record<string, unknown>} next
+ * @param {string} isoDate
+ * @param {string} referenceIso
+ * @returns {Record<string, unknown>}
+ */
+function preservePastTimecardTail(current, next, isoDate, referenceIso) {
+  if (!current || isoDate >= referenceIso) return next;
+
+  const currentMax = maxPunchIndex(current);
+  const nextMax = maxPunchIndex(next);
+  if (currentMax <= nextMax || nextMax === 0) return next;
+
+  for (let i = 1; i <= nextMax; i += 1) {
+    if (next[`clockIn${i}`] !== current[`clockIn${i}`] || next[`clockOut${i}`] !== current[`clockOut${i}`]) {
+      return next;
+    }
+  }
+
+  const merged = { ...next };
+  for (let i = nextMax + 1; i <= currentMax; i += 1) {
+    merged[`clockIn${i}`] = current[`clockIn${i}`] ?? null;
+    merged[`clockOut${i}`] = current[`clockOut${i}`] ?? null;
+  }
+  if (merged.shiftTotal == null && current.shiftTotal != null) {
+    merged.shiftTotal = current.shiftTotal;
+  }
+  if (merged.dailyTotal == null && current.dailyTotal != null) {
+    merged.dailyTotal = current.dailyTotal;
+  }
+  return merged;
+}
+
+/**
  * @param {string} dataDir
  * @param {{
  *   isoDate: string,
@@ -251,10 +303,16 @@ function persistTimecardData(dataDir, timecardData) {
   const referenceIso = timecardData.extractedAt.slice(0, 10);
 
   for (const entry of timecardData.entries) {
-    const value = normalizeTimecardValue(entry);
     const isoDate = typeof entry.isoDate === "string"
       ? entry.isoDate
       : resolveDdmmIso(entry.date, referenceIso);
+    const existing = loadDayRecord(dataDir, isoDate);
+    const value = preservePastTimecardTail(
+      existing?.current?.timecard,
+      normalizeTimecardValue(entry),
+      isoDate,
+      referenceIso
+    );
     const result = updateDayRecord(dataDir, {
       isoDate,
       day: entry.day,

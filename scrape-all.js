@@ -16,6 +16,8 @@ import { formatDate, addDays, mapApiToShifts } from "./schedule-utils.js";
  * @property {string | null} clockOut1
  * @property {string | null} clockIn2
  * @property {string | null} clockOut2
+ * @property {string | null} [clockIn3]
+ * @property {string | null} [clockOut3]
  * @property {string | null} payCode
  * @property {string | null} amount
  * @property {string | null} shiftTotal
@@ -177,17 +179,18 @@ async function extractTimecardEntries(page) {
       .filter((value) => value !== null)
       .sort((left, right) => left - right);
 
+    let currentEntry = null;
+
     for (const i of rowIndexes) {
       const dateEl = document.getElementById(`${i}_date`);
       if (!dateEl) continue;
 
       const dateText = dateEl.getAttribute("title") || dateEl.innerText.trim();
       const match = dateText.match(/(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\d{2}\/\d{2})/);
-      if (!match) continue;
 
       /** @param {string} col */
-      const cell = (col) => {
-        const el = document.getElementById(`${i}_${col}`);
+      const cell = (col, rowIndex = i) => {
+        const el = document.getElementById(`${rowIndex}_${col}`);
         if (!el) return null;
         const isPunch = col.includes("punch");
         if (isPunch) {
@@ -204,20 +207,76 @@ async function extractTimecardEntries(page) {
         return val || null;
       };
 
-      results.push({
+      const numberedColumns = (base, rowIndex = i) => Array.from(document.querySelectorAll(`[id^="${rowIndex}_${base}"]`))
+        .map((element) => {
+          const escapedBase = base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const match = element.id.match(new RegExp(`^${rowIndex}_${escapedBase}(\\d*)$`));
+          if (!match) return null;
+          return { col: `${base}${match[1]}`, n: match[1] ? Number(match[1]) : 1 };
+        })
+        .filter(Boolean)
+        .sort((left, right) => left.n - right.n)
+        .map((item) => item.col);
+
+      const lastValue = (base, rowIndex = i) => {
+        const values = numberedColumns(base, rowIndex).map((col) => cell(col, rowIndex)).filter(Boolean);
+        return values.length > 0 ? values[values.length - 1] : null;
+      };
+
+      const nextPunchIndex = (entry) => {
+        let next = 1;
+        while (entry[`clockIn${next}`] || entry[`clockOut${next}`]) next += 1;
+        return next;
+      };
+
+      const appendPunches = (entry, rowIndex) => {
+        const inPunchColumns = numberedColumns("inpunch", rowIndex);
+        const outPunchColumns = numberedColumns("outpunch", rowIndex);
+        const maxPunches = Math.max(inPunchColumns.length, outPunchColumns.length);
+        for (let punchIndex = 1; punchIndex <= maxPunches; punchIndex += 1) {
+          const suffix = punchIndex === 1 ? "" : String(punchIndex);
+          const clockIn = cell(`inpunch${suffix}`, rowIndex);
+          const clockOut = cell(`outpunch${suffix}`, rowIndex);
+          if (!clockIn && !clockOut) continue;
+          const targetIndex = nextPunchIndex(entry);
+          entry[`clockIn${targetIndex}`] = clockIn;
+          entry[`clockOut${targetIndex}`] = clockOut;
+        }
+      };
+
+      const applyTotals = (entry, rowIndex) => {
+        entry.shiftTotal = lastValue("workedshifttotal", rowIndex) || entry.shiftTotal || null;
+        entry.dailyTotal = lastValue("dailytotal", rowIndex) || lastValue("workedshifttotal", rowIndex) || entry.dailyTotal || null;
+      };
+
+      if (!match) {
+        if (currentEntry) {
+          appendPunches(currentEntry, i);
+          applyTotals(currentEntry, i);
+        }
+        continue;
+      }
+
+      currentEntry = {
         date: match[2],
         day: match[1],
         schedule: cell("scheduleshift"),
         absence: cell("absence"),
-        clockIn1: cell("inpunch"),
-        clockOut1: cell("outpunch"),
-        clockIn2: cell("inpunch2"),
-        clockOut2: cell("outpunch2"),
         payCode: cell("name"),
         amount: cell("amount"),
-        shiftTotal: cell("workedshifttotal"),
-        dailyTotal: cell("dailytotal"),
-      });
+        shiftTotal: null,
+        dailyTotal: null,
+      };
+
+      appendPunches(currentEntry, i);
+      applyTotals(currentEntry, i);
+
+      currentEntry.clockIn1 ??= null;
+      currentEntry.clockOut1 ??= null;
+      currentEntry.clockIn2 ??= null;
+      currentEntry.clockOut2 ??= null;
+
+      results.push(currentEntry);
     }
 
     return results;

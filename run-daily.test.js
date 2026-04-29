@@ -4,6 +4,7 @@ import {
   formatShift, detectScheduleChanges, detectTimecardDiscrepancy,
   detectTimecardChanges, parseTime, formatAlert,
   calculateDailyTotal, formatClockPairs, detectTotalMismatch,
+  filterNewOrChangedItems,
   parseScraperResult, tailOutput,
 } from "./run-daily.js";
 
@@ -113,6 +114,20 @@ test("calculateDailyTotal: two clock pairs on weekday", () => {
   assert.strictEqual(calculateDailyTotal(entry), "5:15");
 });
 
+test("calculateDailyTotal: three clock pairs", () => {
+  const entry = {
+    day: "Tue",
+    clockIn1: "09:00",
+    clockOut1: "12:18",
+    clockIn2: "13:18",
+    clockOut2: "15:55",
+    clockIn3: "16:17",
+    clockOut3: "18:55",
+  };
+  assert.strictEqual(calculateDailyTotal(entry), "8:33");
+  assert.strictEqual(calculateDailyTotal(entry, true), "8:38");
+});
+
 test("calculateDailyTotal: no complete pairs returns null", () => {
   assert.strictEqual(calculateDailyTotal({ clockIn1: "9:00", clockOut1: null }), null);
   assert.strictEqual(calculateDailyTotal({}), null);
@@ -143,6 +158,18 @@ test("formatClockPairs: single pair", () => {
 test("formatClockPairs: two pairs", () => {
   const entry = { clockIn1: "13:56", clockOut1: "16:36", clockIn2: "16:51", clockOut2: "19:26" };
   assert.strictEqual(formatClockPairs(entry), "13:56 - 16:36, 16:51 - 19:26");
+});
+
+test("formatClockPairs: three pairs", () => {
+  const entry = {
+    clockIn1: "09:00",
+    clockOut1: "12:18",
+    clockIn2: "13:18",
+    clockOut2: "15:55",
+    clockIn3: "16:17",
+    clockOut3: "18:55",
+  };
+  assert.strictEqual(formatClockPairs(entry), "09:00 - 12:18, 13:18 - 15:55, 16:17 - 18:55");
 });
 
 test("formatClockPairs: no pairs returns null", () => {
@@ -265,6 +292,27 @@ test("detectTimecardDiscrepancy: only clock-in mismatch", () => {
   assert.strictEqual(result.length, 1);
   assert.ok(result[0].includes("Clock In"));
   assert.ok(!result[0].includes("Clock Out"));
+});
+
+test("detectTimecardDiscrepancy: missing clock-in after scheduled start is reported", () => {
+  const schedule = { shifts: [{ date: "2026-04-10", day: "Fri", start: "14:00", end: "19:00", off: false }] };
+  const timecard = { entries: [] };
+  const result = detectTimecardDiscrepancy(schedule, timecard, "2026-04-10", "2026-04-10T15:05:00Z");
+  assert.ok(result);
+  assert.strictEqual(result.length, 1);
+  assert.ok(result[0].includes("Fri 10 Apr"));
+  assert.ok(result[0].includes("Clock In"));
+  assert.ok(result[0].includes("missing"));
+  assert.ok(result[0].includes("scheduled 14:00"));
+});
+
+test("detectTimecardDiscrepancy: missing clock-in within threshold stays quiet", () => {
+  const schedule = { shifts: [{ date: "2026-04-10", day: "Fri", start: "14:00", end: "19:00", off: false }] };
+  const timecard = { entries: [] };
+  assert.strictEqual(
+    detectTimecardDiscrepancy(schedule, timecard, "2026-04-10", "2026-04-10T14:30:00Z"),
+    null
+  );
 });
 
 test("detectTimecardDiscrepancy: ignores break boundaries when first in and final out match shift", () => {
@@ -489,6 +537,26 @@ test("detectTotalMismatch: mismatched totals returns alert", () => {
   assert.ok(result[0].includes("7:30"));
 });
 
+test("detectTotalMismatch: reports three-pair UKG total mismatch", () => {
+  const data = { entries: [{
+    date: "28/04",
+    day: "Tue",
+    clockIn1: "09:00",
+    clockOut1: "12:18",
+    clockIn2: "13:18",
+    clockOut2: "15:55",
+    clockIn3: "16:17",
+    clockOut3: "18:55",
+    dailyTotal: "8:53",
+  }] };
+  const result = detectTotalMismatch(data);
+  assert.ok(result);
+  assert.strictEqual(result.length, 1);
+  assert.ok(result[0].includes("09:00 - 12:18, 13:18 - 15:55, 16:17 - 18:55"));
+  assert.ok(result[0].includes("Calculated: 8:33"));
+  assert.ok(result[0].includes("Reported:   8:53"));
+});
+
 test("detectTotalMismatch: scheduled break adds 5min bonus via cache", () => {
   const breakCache = {
     "2026-02-21": [{ start: "9:00", end: "13:00" }, { start: "13:25", end: "14:05" }],
@@ -557,6 +625,19 @@ test("detectTotalMismatch: null data returns null", () => {
 test("detectTotalMismatch: skips entries without scraped total", () => {
   const data = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00", dailyTotal: null }] };
   assert.strictEqual(detectTotalMismatch(data), null);
+});
+
+// --- filterNewOrChangedItems ---
+
+test("filterNewOrChangedItems: suppresses unchanged mismatch items", () => {
+  const item = "Wed 8 Apr\n  10:17 - 14:15, 14:32 - 18:24\n  Calculated: 7:55\n  Reported:   8:07";
+  assert.strictEqual(filterNewOrChangedItems([item], [item]), null);
+});
+
+test("filterNewOrChangedItems: keeps changed mismatch items", () => {
+  const previousItem = "Wed 8 Apr\n  10:17 - 14:15, 14:32 - 18:24\n  Calculated: 7:55\n  Reported:   8:07";
+  const currentItem = "Wed 8 Apr\n  10:17 - 14:15, 14:32 - 18:24\n  Calculated: 7:55\n  Reported:   8:02";
+  assert.deepStrictEqual(filterNewOrChangedItems([currentItem], [previousItem]), [currentItem]);
 });
 
 // --- formatAlert ---

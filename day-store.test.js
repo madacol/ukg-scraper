@@ -129,6 +129,46 @@ test("persistTimecardData: preserves completely empty timecard rows", () => {
   });
 });
 
+test("persistTimecardData: does not let a later past-day scrape delete a known punch tail", () => {
+  const dataDir = makeTempDir();
+
+  persistTimecardData(dataDir, {
+    extractedAt: "2026-04-28T19:10:44.827Z",
+    entries: [{
+      date: "28/04",
+      day: "Tue",
+      clockIn1: "09:00",
+      clockOut1: "12:18",
+      clockIn2: "13:18",
+      clockOut2: "15:55",
+      clockIn3: "16:17",
+      clockOut3: "18:55",
+      shiftTotal: "8:53",
+      dailyTotal: "8:53",
+    }],
+  });
+
+  persistTimecardData(dataDir, {
+    extractedAt: "2026-04-29T14:10:33.025Z",
+    entries: [{
+      date: "28/04",
+      day: "Tue",
+      clockIn1: "09:00",
+      clockOut1: "12:18",
+      clockIn2: "13:18",
+      clockOut2: "15:55",
+      shiftTotal: null,
+      dailyTotal: null,
+    }],
+  });
+
+  const stored = JSON.parse(fs.readFileSync(getDayFilePath(dataDir, "2026-04-28"), "utf8"));
+  assert.strictEqual(stored.current.timecard.clockIn3, "16:17");
+  assert.strictEqual(stored.current.timecard.clockOut3, "18:55");
+  assert.strictEqual(stored.current.timecard.dailyTotal, "8:53");
+  assert.strictEqual(stored.history.length, 1);
+});
+
 test("buildScheduleDataFromStore and buildTimecardDataFromStore: rebuild aggregate views from day files", () => {
   const dataDir = makeTempDir();
 

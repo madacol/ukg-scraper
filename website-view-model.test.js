@@ -112,6 +112,36 @@ test("buildWebsiteViewModel: handles missing files cleanly", () => {
   assert.ok(model.issues.includes("Timecard data file is missing."));
 });
 
+test("buildWebsiteViewModel: exposes scraped and calculated timecard totals", () => {
+  const timecard = {
+    extractedAt: "2026-04-29T14:57:30.000Z",
+    period: "Last 30 Days",
+    entries: [{
+      date: "28/04",
+      day: "Tue",
+      isoDate: "2026-04-28",
+      schedule: "09:00 - 19:00",
+      clockIn1: "09:00",
+      clockOut1: "12:18",
+      clockIn2: "13:18",
+      clockOut2: "15:55",
+      clockIn3: "16:17",
+      clockOut3: "18:55",
+      dailyTotal: "8:53",
+      shiftTotal: "8:53",
+    }],
+  };
+
+  const model = buildWebsiteViewModel({ schedule: null, timecard, now: "2026-04-29T15:00:00.000Z" });
+  const day = model.timelineDays.find((d) => d.date === "2026-04-28");
+
+  assert.ok(day);
+  assert.strictEqual(day.scrapedTotal, "8:53");
+  assert.strictEqual(day.calculatedTotal, "8:33");
+  assert.strictEqual(model.timecardSummary.scrapedHours, "8:53");
+  assert.strictEqual(model.timecardSummary.calculatedHours, "8:33");
+});
+
 test("buildWebsiteViewModel: produces a unified timeline merging schedule and timecard", () => {
   const schedule = {
     extractedAt: "2026-03-28T21:00:00.000Z",
