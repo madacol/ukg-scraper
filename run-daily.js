@@ -316,6 +316,53 @@ function hasTimecardActivity(entry) {
 }
 
 /**
+ * @param {Record<string, string | null | undefined>} entry
+ * @returns {boolean}
+ */
+function hasCompleteClockPair(entry) {
+  for (let i = 1; i <= 10; i += 1) {
+    if (entry[`clockIn${i}`] && entry[`clockOut${i}`]) return true;
+  }
+  return false;
+}
+
+/**
+ * @param {Record<string, string | null | undefined>} entry
+ * @returns {boolean}
+ */
+function hasClockOut(entry) {
+  for (let i = 1; i <= 10; i += 1) {
+    if (entry[`clockOut${i}`]) return true;
+  }
+  return false;
+}
+
+/**
+ * A new current-day timecard with only an on-time clock-in is expected while
+ * the shift is still in progress, so it should not generate a change alert.
+ * @param {Record<string, string | null | undefined>} entry
+ * @param {{ date?: string, start: string | null, end: string | null, off: boolean } | undefined} shift
+ * @param {Date} now
+ * @param {number} thresholdMinutes
+ * @returns {boolean}
+ */
+function isExpectedInProgressTimecard(entry, shift, now, thresholdMinutes) {
+  if (!shift || shift.off || !shift.date || !shift.start || !shift.end) return false;
+  if (shift.date !== now.toISOString().slice(0, 10)) return false;
+  if (!entry.clockIn1 || hasClockOut(entry) || hasCompleteClockPair(entry)) return false;
+  if (entry.absence || entry.payCode || entry.amount || entry.shiftTotal || entry.dailyTotal) return false;
+
+  const clockIn = parseTime(entry.clockIn1);
+  const scheduledStart = parseTime(shift.start);
+  const scheduledEnd = parseTime(shift.end);
+  if (clockIn === null || scheduledStart === null || scheduledEnd === null) return false;
+
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  return Math.abs(clockIn - scheduledStart) <= thresholdMinutes
+    && nowMinutes <= scheduledEnd + thresholdMinutes;
+}
+
+/**
  * @param {{ shifts: Array<{ date: string, day: string, start: string | null, end: string | null, off: boolean }> } | null} scheduleData
  * @param {{ entries: Array<{ date: string, day: string, clockIn1?: string | null, clockOut1?: string | null }> } | null} timecardData
  * @param {string} [dateOverride]
@@ -380,17 +427,20 @@ function detectTimecardDiscrepancy(scheduleData, timecardData, dateOverride, now
  * @param {{ entries: Array<Record<string, string | null>> } | null} oldData
  * @param {{ entries: Array<Record<string, string | null>> }} newData
  * @param {{ shifts: Array<{ date: string, day: string, start: string | null, end: string | null, off: boolean }> }} [scheduleData]
+ * @param {string | Date} [nowOverride]
  * @returns {string[] | null}
  */
-function detectTimecardChanges(oldData, newData, scheduleData) {
+function detectTimecardChanges(oldData, newData, scheduleData, nowOverride) {
   if (!oldData) return null;
+
+  const now = nowOverride instanceof Date ? nowOverride : (nowOverride ? new Date(nowOverride) : new Date());
 
   /** @type {Record<string, Record<string, string | null>>} */
   const oldEntries = {};
   for (const e of oldData.entries) oldEntries[e.date] = e;
 
   // Build DD/MM → shift lookup from schedule data
-  /** @type {Record<string, { start: string | null, end: string | null, off: boolean }>} */
+  /** @type {Record<string, { date: string, start: string | null, end: string | null, off: boolean }>} */
   const shiftByDdmm = {};
   if (scheduleData) {
     for (const s of scheduleData.shifts) {
@@ -415,12 +465,10 @@ function detectTimecardChanges(oldData, newData, scheduleData) {
       if (lines.length > 0) {
         const shift = shiftByDdmm[e.date];
         if (scheduleData) {
-          let hasCompletePair = false;
-          for (let i = 1; i <= 10; i += 1) {
-            hasCompletePair ||= Boolean(e[`clockIn${i}`] && e[`clockOut${i}`]);
-          }
+          const hasCompletePair = hasCompleteClockPair(e);
           const isOff = !shift || shift.off;
           if (isOff && !hasCompletePair) continue;
+          if (isExpectedInProgressTimecard(e, shift, now, THRESHOLD)) continue;
           if (shift && !shift.off && shift.start && shift.end) {
             const inDiff = parseTime(e.clockIn1) !== null && parseTime(shift.start) !== null
               ? Math.abs(parseTime(e.clockIn1) - parseTime(shift.start))

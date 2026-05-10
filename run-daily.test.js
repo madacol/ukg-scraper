@@ -444,6 +444,38 @@ test("detectTimecardChanges: new entry skipped when times match schedule", () =>
   assert.strictEqual(result, null);
 });
 
+test("detectTimecardChanges: new in-progress current shift is skipped before scheduled clock-out", () => {
+  const oldData = { entries: [{ date: "09/05", day: "Sat", clockIn1: "9:00", clockOut1: "17:00" }] };
+  const newData = {
+    entries: [
+      { date: "09/05", day: "Sat", clockIn1: "9:00", clockOut1: "17:00" },
+      { date: "10/05", day: "Sun", clockIn1: "13:56", clockOut1: null, dailyTotal: null },
+    ],
+  };
+  const schedule = {
+    shifts: [{ date: "2026-05-10", day: "Sun", start: "14:00", end: "19:00", off: false }],
+  };
+  const result = detectTimecardChanges(oldData, newData, schedule, "2026-05-10T18:15:00Z");
+  assert.strictEqual(result, null);
+});
+
+test("detectTimecardChanges: new incomplete shift is reported after scheduled clock-out buffer", () => {
+  const oldData = { entries: [{ date: "09/05", day: "Sat", clockIn1: "9:00", clockOut1: "17:00" }] };
+  const newData = {
+    entries: [
+      { date: "09/05", day: "Sat", clockIn1: "9:00", clockOut1: "17:00" },
+      { date: "10/05", day: "Sun", clockIn1: "13:56", clockOut1: null, dailyTotal: null },
+    ],
+  };
+  const schedule = {
+    shifts: [{ date: "2026-05-10", day: "Sun", start: "14:00", end: "19:00", off: false }],
+  };
+  const result = detectTimecardChanges(oldData, newData, schedule, "2026-05-10T19:51:00Z");
+  assert.ok(result);
+  assert.ok(result[0].includes("Sun 10 May"));
+  assert.ok(result[0].includes("13:56 - ?"));
+});
+
 test("detectTimecardChanges: new entry reported when times differ from schedule", () => {
   const oldData = { entries: [{ date: "20/02", day: "Fri", clockIn1: "9:00", clockOut1: "17:00" }] };
   const newData = {
